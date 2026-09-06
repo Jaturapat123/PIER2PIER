@@ -1,0 +1,14 @@
+# คัดลอกเป็น terraform.tfvars แล้วใส่ค่าจริง (ไฟล์นี้อยู่ใน .gitignore แล้ว)
+
+project     = "pier2pier"
+environment = "dev"
+aws_region  = "ap-southeast-1"
+
+# ช่วงพัฒนา: Single-AZ ประหยัดกว่าครึ่งหนึ่ง
+# ตอนสาธิต Stage 3: เปลี่ยนเป็น true เพื่อแสดง failover ของฐานข้อมูล
+db_multi_az = false
+
+db_password = "เปลี่ยนเป็นรหัสผ่านที่คาดเดายาก"
+jwt_secret  = "สร้างด้วย openssl rand -base64 48"
+
+alarm_email = "your-email@example.com"

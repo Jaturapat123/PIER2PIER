@@ -1,0 +1,234 @@
+name: Deploy
+
+# ทำงานเมื่อโค้ดถูก merge เข้า main แล้วเท่านั้น
+# เรียกเองจากหน้า Actions ได้ด้วยเผื่อต้อง deploy ซ้ำ
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# ต้องมี id-token: write เพื่อขอ OIDC token จาก GitHub
+# แลกเป็น temporary credential ของ AWS — วิธีนี้ไม่ต้องเก็บ access key
+# เป็น secret ที่ไม่มีวันหมดอายุไว้ใน GitHub เลย
+permissions:
+  id-token: write
+  contents: read
+
+# ห้าม deploy ซ้อนกัน ถ้ามีตัวใหม่มาให้รอตัวเก่าจบก่อน
+# ไม่งั้นสองงานจะแย่งกันเปลี่ยน container บนเครื่องเดียวกัน
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  PROJECT: pier2pier-dev
+
+jobs:
+  test:
+    name: 1. ทดสอบก่อน deploy
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpass
+          MYSQL_DATABASE: pier2pier_wms
+          MYSQL_USER: wms
+          MYSQL_PASSWORD: wmspass
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uwms -pwmspass"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: npm, cache-dependency-path: backend/package-lock.json }
+
+      - run: npm ci
+        working-directory: backend
+
+      - run: npm run migrate && npm run seed && npm test
+        working-directory: backend
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: wms
+          DB_PASSWORD: wmspass
+          DB_NAME: pier2pier_wms
+          JWT_SECRET: ci-test-secret
+
+  build:
+    name: 2. Build และ push image
+    needs: test
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_tag: ${{ steps.meta.outputs.tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: กำหนดแท็กจาก git SHA
+        id: meta
+        # ใช้ SHA เป็นแท็กเพราะย้อนกลับได้ — ถ้าใช้แต่ latest จะไม่มีทางรู้ว่า
+        # เวอร์ชันก่อนหน้าคืออันไหน และ rollback ไม่ได้
+        run: echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+        id: ecr
+
+      - name: Build และ push
+        run: |
+          REPO="${{ steps.ecr.outputs.registry }}/${PROJECT}-api"
+          TAG="${{ steps.meta.outputs.tag }}"
+
+          # ไม่ต้องส่ง GIT_SHA เข้าไปตอน build เพราะ deploy-app.sh บนเครื่อง
+          # เขียนค่านี้ลง /etc/pier2pier.env ตอน deploy อยู่แล้ว
+          # image เดียวกันจึงใช้ได้ทุกสภาพแวดล้อมโดยไม่ต้อง build ซ้ำ
+          docker build -t "$REPO:$TAG" -t "$REPO:latest" ./backend
+
+          docker push "$REPO:$TAG"
+          docker push "$REPO:latest"
+
+          echo "### Image ที่ build" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`$REPO:$TAG\`" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-api:
+    name: 3. Deploy ทีละเครื่อง
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: หา instance และ target group
+        id: infra
+        run: |
+          IDS=$(aws ec2 describe-instances \
+            --filters "Name=tag:Project,Values=pier2pier" \
+                      "Name=tag:Role,Values=application" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[].Instances[].InstanceId" --output text)
+
+          TG=$(aws elbv2 describe-target-groups \
+            --names "${PROJECT}-tg" \
+            --query "TargetGroups[0].TargetGroupArn" --output text)
+
+          echo "instance_ids=$IDS" >> "$GITHUB_OUTPUT"
+          echo "target_group=$TG" >> "$GITHUB_OUTPUT"
+          echo "จะ deploy ไปยังเครื่อง: $IDS"
+
+      - name: Deploy แบบทีละเครื่อง (rolling)
+        # หัวใจของขั้นนี้: deploy เครื่องหนึ่ง รอจนมันกลับมา healthy จริง
+        # แล้วค่อยไปเครื่องถัดไป ระหว่างนั้นอีกเครื่องยังรับผู้ใช้อยู่ = ไม่มี downtime
+        run: |
+          set -euo pipefail
+          REPO=$(aws ecr describe-repositories --repository-names "${PROJECT}-api" \
+                   --query "repositories[0].repositoryUri" --output text)
+          TAG="${{ needs.build.outputs.image_tag }}"
+          TG="${{ steps.infra.outputs.target_group }}"
+
+          for ID in ${{ steps.infra.outputs.instance_ids }}; do
+            echo "::group::Deploy $ID"
+
+            CMD=$(aws ssm send-command \
+              --instance-ids "$ID" \
+              --document-name "AWS-RunShellScript" \
+              --comment "deploy $TAG" \
+              --parameters "commands=[\"/usr/local/bin/deploy-app.sh ${AWS_REGION} $REPO $TAG\"]" \
+              --query "Command.CommandId" --output text)
+
+            aws ssm wait command-executed --command-id "$CMD" --instance-id "$ID" || {
+              echo "การ deploy ที่เครื่อง $ID ล้มเหลว — หยุดทันที ไม่ไปเครื่องถัดไป"
+              aws ssm get-command-invocation --command-id "$CMD" --instance-id "$ID" \
+                --query "StandardErrorContent" --output text
+              exit 1
+            }
+
+            echo "รอให้ ALB ยืนยันว่าเครื่องนี้ healthy ก่อนไปเครื่องถัดไป"
+            for i in $(seq 1 40); do
+              STATE=$(aws elbv2 describe-target-health \
+                --target-group-arn "$TG" --targets "Id=$ID" \
+                --query "TargetHealthDescriptions[0].TargetHealth.State" --output text)
+              echo "  สถานะ: $STATE"
+              [ "$STATE" = "healthy" ] && break
+              [ "$i" = "40" ] && { echo "เครื่อง $ID ไม่กลับมา healthy — หยุด deploy"; exit 1; }
+              sleep 5
+            done
+
+            echo "::endgroup::"
+          done
+
+      - name: ทดสอบว่าเวอร์ชันใหม่ขึ้นจริงผ่าน Load Balancer
+        run: |
+          set -euo pipefail
+          ALB=$(aws elbv2 describe-load-balancers --names "${PROJECT}-alb" \
+                  --query "LoadBalancers[0].DNSName" --output text)
+          TAG="${{ needs.build.outputs.image_tag }}"
+
+          # ยิงหลายครั้งเพื่อให้แน่ใจว่าโดนทุกเครื่อง ไม่ใช่เครื่องเดียวที่บังเอิญอัปเดตแล้ว
+          for i in $(seq 1 10); do
+            SHA=$(curl -fsS "http://$ALB/health" | grep -o '"gitSha":"[^"]*"' | cut -d'"' -f4)
+            echo "คำขอที่ $i -> เวอร์ชัน $SHA"
+            [ "$SHA" = "$TAG" ] || { echo "ยังมีเครื่องที่รันเวอร์ชันเก่าอยู่"; exit 1; }
+          done
+
+          echo "### Deploy สำเร็จ" >> "$GITHUB_STEP_SUMMARY"
+          echo "ทุกเครื่องรันเวอร์ชัน \`$TAG\` แล้ว · http://$ALB" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-frontend:
+    name: 4. Deploy frontend
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: npm, cache-dependency-path: frontend/package-lock.json }
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Build
+        # ไม่ต้องฝังที่อยู่ API ลงไป เพราะ CloudFront ส่งต่อ /api/* ไปยัง ALB ให้แล้ว
+        # หน้าเว็บจึงเรียก API ด้วย path สัมพัทธ์บนโดเมนเดียวกัน
+        #
+        # ถ้าฝัง http://<alb> ลงไปตรง ๆ เบราว์เซอร์จะบล็อกทุกคำขอ
+        # เพราะหน้าเว็บเสิร์ฟผ่าน HTTPS แต่ปลายทางเป็น HTTP (mixed content)
+        run: |
+          npm ci
+          npm run build
+        working-directory: frontend
+
+      - name: อัปโหลดขึ้น S3
+        run: |
+          BUCKET="${PROJECT}-web"
+
+          # ไฟล์ที่มี hash ในชื่ออยู่แล้ว cache ได้ยาว ๆ เพราะชื่อจะเปลี่ยนเมื่อเนื้อหาเปลี่ยน
+          aws s3 sync dist/ "s3://$BUCKET/" --delete \
+            --cache-control "public,max-age=31536000,immutable" \
+            --exclude "index.html"
+
+          # index.html ห้าม cache เด็ดขาด ไม่งั้นผู้ใช้จะยังได้หน้าเก่าที่ชี้ไปไฟล์ที่ถูกลบแล้ว
+          aws s3 cp dist/index.html "s3://$BUCKET/index.html" \
+            --cache-control "no-cache,no-store,must-revalidate"
+        working-directory: frontend
+
+      - name: ล้าง cache ของ CloudFront
+        run: |
+          DIST=$(aws cloudfront list-distributions \
+            --query "DistributionList.Items[?Comment=='${PROJECT} frontend'].Id | [0]" --output text)
+          aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"

@@ -1,0 +1,89 @@
+# สภาพแวดล้อมสำหรับพัฒนาบนเครื่องตัวเอง
+#
+# ตั้งใจให้หน้าตาใกล้เคียงของจริงบน AWS: api สองตัวจำลอง EC2 สองเครื่อง
+# มี nginx ทำหน้าที่แทน ALB เพื่อให้เห็นการกระจายโหลดและทดสอบ failover
+# ได้ตั้งแต่บนโน้ตบุ๊ก ก่อนขึ้นจริง
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: wms-db
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: pier2pier_wms
+      MYSQL_USER: wms
+      MYSQL_PASSWORD: wmspass
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_general_ci
+    ports:
+      - '3307:3306'
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'mysqladmin', 'ping', '-h', 'localhost', '-uwms', '-pwmspass']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api-a:
+    build: ./backend
+    container_name: wms-api-a
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DB_HOST: db
+      DB_USER: wms
+      DB_PASSWORD: wmspass
+      DB_NAME: pier2pier_wms
+      JWT_SECRET: dev-secret-change-me-in-production
+      CORS_ORIGINS: 'http://localhost:5173,http://localhost:8080'
+      GIT_SHA: local-a
+      # ชื่อจำลอง AZ เพื่อให้หน้า System Health แสดงผลได้เหมือนของจริง
+      FAKE_AZ: ap-southeast-1a
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '3000:3000'
+    command: sh -c "node src/db/migrate.js && node src/db/seed.js && node src/server.js"
+
+  api-b:
+    build: ./backend
+    container_name: wms-api-b
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DB_HOST: db
+      DB_USER: wms
+      DB_PASSWORD: wmspass
+      DB_NAME: pier2pier_wms
+      JWT_SECRET: dev-secret-change-me-in-production
+      CORS_ORIGINS: 'http://localhost:5173,http://localhost:8080'
+      GIT_SHA: local-b
+      FAKE_AZ: ap-southeast-1b
+    depends_on:
+      db:
+        condition: service_healthy
+      api-a:
+        # ต้องรอจน api-a ผ่าน health check ไม่ใช่แค่ container เริ่มทำงาน
+        # เพราะ api-a เป็นตัวที่รัน migrate และ seed — ถ้ารอแค่ service_started
+        # api-b อาจขึ้นมารับคำขอตอนที่ตารางยังไม่ถูกสร้าง
+        condition: service_healthy
+    ports:
+      - '3001:3000'
+    # api-a รัน migrate/seed ไปแล้ว ตัวนี้แค่ start พอ
+    command: node src/server.js
+
+  # แทน ALB ในสภาพแวดล้อมพัฒนา — กระจายโหลดแบบ round-robin ไป api-a และ api-b
+  lb:
+    image: nginx:1.27-alpine
+    container_name: wms-lb
+    volumes:
+      - ./infra/dev-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - '8080:80'
+    depends_on:
+      - api-a
+      - api-b
+
+volumes:
+  db_data:

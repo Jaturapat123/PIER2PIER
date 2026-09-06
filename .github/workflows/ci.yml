@@ -1,0 +1,106 @@
+name: CI
+
+# ตรวจทุก pull request และทุก push ที่ไม่ใช่ main
+# หน้าที่คือกันไม่ให้โค้ดที่พังถูก merge — ไม่ deploy อะไรทั้งสิ้น
+on:
+  pull_request:
+  push:
+    branches-ignore: [main]
+
+jobs:
+  backend:
+    name: Backend — lint และ test
+    runs-on: ubuntu-latest
+
+    # MySQL จริงสำหรับรันเทสต์ ไม่ใช้ mock เพราะเราต้องพิสูจน์ว่า transaction
+    # และ SELECT ... FOR UPDATE ที่กัน race ตอนจองทำงานจริงกับ MySQL
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpass
+          MYSQL_DATABASE: pier2pier_wms
+          MYSQL_USER: wms
+          MYSQL_PASSWORD: wmspass
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -uwms -pwmspass"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      - name: รัน migration และ seed
+        run: npm run migrate && npm run seed
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: wms
+          DB_PASSWORD: wmspass
+          DB_NAME: pier2pier_wms
+          JWT_SECRET: ci-test-secret
+
+      - name: รันเทสต์
+        run: npm test
+        env:
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_USER: wms
+          DB_PASSWORD: wmspass
+          DB_NAME: pier2pier_wms
+          JWT_SECRET: ci-test-secret
+
+  frontend:
+    name: Frontend — typecheck และ build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+  terraform:
+    name: Terraform — fmt และ validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+
+      - name: ตรวจการจัดรูปแบบ
+        run: terraform fmt -check -recursive
+        working-directory: infra/terraform
+
+      # -backend=false เพราะขั้นนี้แค่ตรวจไวยากรณ์ ไม่ต้องต่อ AWS จริง
+      - name: ตรวจความถูกต้องของ configuration
+        run: |
+          terraform init -backend=false
+          terraform validate
+        working-directory: infra/terraform

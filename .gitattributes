@@ -1,0 +1,8 @@
+# บังคับ LF สำหรับไฟล์ที่ต้องรันบน Linux
+# user-data.sh ถูกฝังเข้า EC2 ผ่าน terraform templatefile ถ้าเป็น CRLF
+# shebang จะพังทันทีบน Amazon Linux — เครื่องบูตมาแล้วไม่มีแอป
+*.sh        text eol=lf
+Dockerfile  text eol=lf
+*.conf      text eol=lf
+*.sql       text eol=lf
+*.yml       text eol=lf
