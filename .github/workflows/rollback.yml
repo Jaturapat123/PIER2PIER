@@ -1,0 +1,117 @@
+name: Rollback
+
+# ย้อนกลับไปเวอร์ชันก่อนหน้าเมื่อ deploy แล้วมีปัญหา
+#
+# ทำงานเร็วกว่า deploy ปกติมาก เพราะไม่ต้อง build ใหม่ — image ของเวอร์ชันเก่า
+# ยังอยู่ใน ECR อยู่แล้ว แค่สั่งให้เครื่องดึง tag เดิมกลับมารัน
+# นี่คือคำตอบของ Pain Point ข้อ 3 ของโครงงาน
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'แท็กที่ต้องการย้อนกลับไป (git SHA 7 ตัวแรก) — ดูรายการได้จาก ECR'
+        required: true
+        type: string
+      reason:
+        description: 'เหตุผลที่ต้อง rollback (บันทึกไว้ในประวัติ)'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-southeast-1
+  PROJECT: pier2pier-dev
+
+jobs:
+  rollback:
+    name: ย้อนกลับไปเวอร์ชัน ${{ inputs.image_tag }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: ตรวจว่ามี image แท็กนี้อยู่จริง
+        # ตรวจก่อนแตะเครื่องใด ๆ — ถ้าพิมพ์แท็กผิดแล้วสั่ง deploy ไปเลย
+        # จะได้เครื่องที่ดึง image ไม่สำเร็จและระบบล่มหนักกว่าเดิม
+        run: |
+          aws ecr describe-images \
+            --repository-name "${PROJECT}-api" \
+            --image-ids imageTag="${{ inputs.image_tag }}" > /dev/null \
+          || { echo "ไม่พบ image แท็ก ${{ inputs.image_tag }} ใน ECR"; exit 1; }
+
+          echo "พบ image แท็ก ${{ inputs.image_tag }} — ดำเนินการต่อ"
+
+      - name: หา instance และ target group
+        id: infra
+        run: |
+          IDS=$(aws ec2 describe-instances \
+            --filters "Name=tag:Project,Values=pier2pier" \
+                      "Name=tag:Role,Values=application" \
+                      "Name=instance-state-name,Values=running" \
+            --query "Reservations[].Instances[].InstanceId" --output text)
+
+          TG=$(aws elbv2 describe-target-groups --names "${PROJECT}-tg" \
+                 --query "TargetGroups[0].TargetGroupArn" --output text)
+
+          echo "instance_ids=$IDS" >> "$GITHUB_OUTPUT"
+          echo "target_group=$TG" >> "$GITHUB_OUTPUT"
+
+      - name: ย้อนเวอร์ชันทีละเครื่อง
+        run: |
+          set -euo pipefail
+          REPO=$(aws ecr describe-repositories --repository-names "${PROJECT}-api" \
+                   --query "repositories[0].repositoryUri" --output text)
+          TAG="${{ inputs.image_tag }}"
+          TG="${{ steps.infra.outputs.target_group }}"
+
+          for ID in ${{ steps.infra.outputs.instance_ids }}; do
+            echo "::group::Rollback $ID"
+
+            CMD=$(aws ssm send-command \
+              --instance-ids "$ID" \
+              --document-name "AWS-RunShellScript" \
+              --comment "rollback to $TAG" \
+              --parameters "commands=[\"/usr/local/bin/deploy-app.sh ${AWS_REGION} $REPO $TAG\"]" \
+              --query "Command.CommandId" --output text)
+
+            aws ssm wait command-executed --command-id "$CMD" --instance-id "$ID"
+
+            for i in $(seq 1 40); do
+              STATE=$(aws elbv2 describe-target-health --target-group-arn "$TG" --targets "Id=$ID" \
+                --query "TargetHealthDescriptions[0].TargetHealth.State" --output text)
+              [ "$STATE" = "healthy" ] && break
+              [ "$i" = "40" ] && { echo "เครื่อง $ID ไม่กลับมา healthy"; exit 1; }
+              sleep 5
+            done
+
+            echo "::endgroup::"
+          done
+
+      - name: ยืนยันว่าย้อนกลับสำเร็จ
+        run: |
+          set -euo pipefail
+          ALB=$(aws elbv2 describe-load-balancers --names "${PROJECT}-alb" \
+                  --query "LoadBalancers[0].DNSName" --output text)
+
+          for i in $(seq 1 10); do
+            SHA=$(curl -fsS "http://$ALB/health" | grep -o '"gitSha":"[^"]*"' | cut -d'"' -f4)
+            [ "$SHA" = "${{ inputs.image_tag }}" ] || { echo "ยังมีเครื่องรันเวอร์ชันอื่นอยู่: $SHA"; exit 1; }
+          done
+
+          {
+            echo "### Rollback สำเร็จ"
+            echo ""
+            echo "- เวอร์ชันที่ใช้อยู่ตอนนี้: \`${{ inputs.image_tag }}\`"
+            echo "- เหตุผล: ${{ inputs.reason }}"
+            echo "- ดำเนินการโดย: @${{ github.actor }}"
+          } >> "$GITHUB_STEP_SUMMARY"
