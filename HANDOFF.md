@@ -49,10 +49,37 @@
    **ห้ามเขียนในรายงานว่าเป็นบั๊กที่ทำซ้ำได้**
 4. ยังไม่มี screenshot จาก AWS Pricing Calculator (Stage 3 ต้องใช้ 10 คะแนน)
 
+## 4.5 GitHub — push แล้ว (6 ก.ย. 2569)
+
+repo: **https://github.com/Jaturapat123/PIER2PIER** (public) · push ในนาม `buildsudtae`
+`gh` ล็อกอินค้างไว้แล้วบนเครื่องนี้ · 2 commit บน `main`
+
+**ผลรัน GitHub Actions (Deploy):**
+
+| Job | ผล |
+|---|---|
+| 1. ทดสอบก่อน deploy | ✅ ผ่าน (MySQL 8 จริง + migrate + seed + 31 เทสต์) |
+| 2. Build และ push image | ❌ ล้มที่ `configure-aws-credentials` |
+| 3-4. Deploy | ⏭️ ข้าม |
+
+สาเหตุ: `secrets.AWS_DEPLOY_ROLE_ARN` ว่าง → `Could not load credentials from any providers`
+**ไม่ใช่บั๊ก** — ยังไม่มี AWS account ต่ออยู่ pipeline หยุดตัวเองถูกต้องแล้ว
+
+แก้ไปแล้วระหว่างทาง: อัป action ทุกตัวให้รันบน Node 24 (checkout v4→v7, setup-node v4→v7,
+configure-aws-credentials v4→v6, setup-terraform v3→v4) คำเตือน Node 20 หายหมด
+**อย่าอัป `node-version: '20'` ที่ใช้รันเทสต์** — ต้องตรงกับ `node:20-alpine` ใน backend/Dockerfile
+
+⚠️ **ค้างอยู่ ยังไม่ได้ตอบ:** commit มี trailer `Co-Authored-By: Claude` ทำให้ Claude ขึ้นเป็น
+contributor บน GitHub ผู้ใช้ถามแล้วแต่ยังไม่ได้สั่งว่าจะลบไหม ถ้าจะลบใช้ `git rebase` แก้ทั้ง 2 commit
+แล้ว force-push (repo ยังไม่มีใคร clone)
+
+---
+
 ## 5. ข้อเสนอที่ผู้ใช้ยังไม่ตอบ (อย่าเริ่มเองถ้าไม่สั่ง)
 
+- ลบ `Co-Authored-By: Claude` ออกจาก commit history ไหม (ถามแล้ว ยังไม่ตอบ)
 - เขียนสคริปต์พูดสำหรับสาธิต 4 ฉาก
-- ไล่ขั้นตอน `terraform apply` ขึ้น AWS จริง
+- ไล่ขั้นตอน `terraform apply` ขึ้น AWS จริง (ต้องมี AWS account ก่อน · ALB ~$24/เดือน)
 
 ## 6. รันยังไง
 
