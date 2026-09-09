@@ -52,8 +52,10 @@ const ADMIN_NAV: NavItem[] = [
  *
  * เป็นตัวที่ทำให้ Load Balancer "มองเห็นได้" ระหว่างนำเสนอ — พอปิด EC2 เครื่องหนึ่ง
  * ป้ายนี้จะเปลี่ยนเป็นอีกเครื่องภายในไม่กี่วินาที
+ *
+ * แสดงเฉพาะพื้นที่ของผู้ดูแลระบบ จึงลิงก์ไปหน้าสถานะระบบได้เสมอ
  */
-function InstanceBadge({ linkToDetail }: { linkToDetail: boolean }) {
+function InstanceBadge() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
 
   useEffect(() => {
@@ -90,19 +92,14 @@ function InstanceBadge({ linkToDetail }: { linkToDetail: boolean }) {
     </>
   );
 
-  const className = 'flex items-center gap-2 rounded px-2 py-1 text-sm text-steel-300';
-  const title = 'เครื่องที่ให้บริการคำขอล่าสุด';
-
-  // ลิงก์ไปหน้าสถานะระบบเฉพาะผู้ดูแลระบบ ลูกค้ากดแล้วจะถูกเด้งกลับ
-  // จึงแสดงเป็นข้อความเฉย ๆ ดีกว่าให้กดแล้วไม่เกิดอะไรตามที่คาด
-  return linkToDetail ? (
-    <Link to="/admin/health" className={`${className} hover:bg-deck`} title={title}>
+  return (
+    <Link
+      to="/admin/health"
+      className="flex items-center gap-2 rounded px-2 py-1 text-sm text-steel-300 hover:bg-deck"
+      title="เครื่องที่ให้บริการคำขอล่าสุด"
+    >
       {content}
     </Link>
-  ) : (
-    <span className={className} title={title}>
-      {content}
-    </span>
   );
 }
 
@@ -178,7 +175,12 @@ export default function Layout({ area }: { area: 'customer' | 'admin' }) {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-16 items-center justify-between gap-3 border-b border-deck bg-ink px-4 lg:px-6">
+        {/* ฝั่งลูกค้าไม่มีป้ายเซิร์ฟเวอร์แล้ว จอใหญ่จึงไม่เหลืออะไรในแถบนี้ — ซ่อนทั้งแถบ
+            ไม่งั้นจะเป็นแถบว่างสูง 64px คาดอยู่เหนือทุกหน้า */}
+        <header
+          className={`flex h-16 items-center justify-between gap-3 border-b border-deck bg-ink px-4 lg:px-6
+                      ${area === 'customer' ? 'lg:hidden' : ''}`}
+        >
           <button
             onClick={() => setMenuOpen((v) => !v)}
             className="flex h-11 w-11 items-center justify-center rounded-md text-steel-200 hover:bg-deck lg:hidden"
@@ -188,9 +190,13 @@ export default function Layout({ area }: { area: 'customer' | 'admin' }) {
             {menuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
 
-          <div className="ml-auto">
-            <InstanceBadge linkToDetail={area === 'admin'} />
-          </div>
+          {/* เฉพาะฝั่งผู้ดูแลระบบ — ลูกค้าไม่ต้องรับรู้ว่าเบื้องหลังมีเซิร์ฟเวอร์กี่เครื่องชื่ออะไร
+              ml-auto จำเป็น เพราะบนจอใหญ่ปุ่มเมนูถูกซ่อน เหลือ badge เป็นลูกตัวเดียว */}
+          {area === 'admin' && (
+            <div className="ml-auto">
+              <InstanceBadge />
+            </div>
+          )}
         </header>
 
         <main className="flex-1 px-4 py-6 lg:px-8">
