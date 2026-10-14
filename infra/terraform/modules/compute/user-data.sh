@@ -87,7 +87,7 @@ run_container() {
     --name pier2pier-api \
     --restart unless-stopped \
     --env-file /etc/pier2pier.env \
-    -p 3000:3000 \
+    -p ${app_port}:${app_port} \
     "$@" \
     "$REPO:$TAG"
 }
@@ -119,7 +119,7 @@ fi
 
 # รอให้แอปพร้อมจริงก่อนคืนค่า ไม่งั้น CI/CD จะไป deploy เครื่องถัดไปทั้งที่เครื่องนี้ยังไม่ขึ้น
 for i in $(seq 1 30); do
-  if curl -fsS "http://localhost:3000/health" > /dev/null 2>&1; then
+  if curl -fsS "http://localhost:${app_port}/health" > /dev/null 2>&1; then
     echo "[deploy] เครื่องพร้อมให้บริการแล้ว (รอไป $i วินาที)"
     exit 0
   fi
