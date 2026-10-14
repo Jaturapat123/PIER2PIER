@@ -45,8 +45,12 @@
 ยังไม่ได้พิสูจน์เลย
 - **`terraform apply` ยังไม่เคยรันกับ AWS จริงแม้ครั้งเดียว** — ยังไม่มี resource ใดในบัญชี
 - ไม่รู้ว่า `LabInstanceProfile` มีอยู่จริงในบัญชีไหม (`validate` ไม่เช็ก data source)
-- **ไม่รู้ว่า LabRole มีสิทธิ์ `logs:CreateLogGroup` ไหม** — ถ้าไม่มี container จะไม่สตาร์ทเลย
-  เพราะ `user-data.sh` ใช้ `--log-driver awslogs` · แผนสำรองอยู่ใน `instruction.md` §4
+- **ไม่รู้ว่า LabRole มีสิทธิ์ `logs:CreateLogStream` และ `logs:PutLogEvents` ไหม**
+  ถ้าไม่มี log จะไม่เข้า CloudWatch แต่**ระบบยังขึ้นได้** — `user-data.sh` ถอยไปใช้
+  `--log-driver json-file` ให้เองแล้วพิมพ์คำเตือนใน `/var/log/user-data.log`
+  ถ้าเจอคำเตือนนั้นให้เขียนเป็นข้อจำกัดในรายงานว่า log ไม่ได้รวมศูนย์
+- **ไม่รู้ว่า deep link บน S3 website endpoint ได้ 404 หรือ 403** — ทั้งสองทางหน้าเว็บทำงานได้
+  ถ้าได้ 403 ให้ถอด `s3:ListBucket` ออกจาก bucket policy · คำสั่งตัดสินอยู่ใน `instruction.md` §9 งานที่ 2
 - ไม่รู้ว่าแล็บยอมให้สร้าง RDS Multi-AZ ไหม
 - ยังไม่ได้รัน workflow deploy/rollback บน GitHub เลยหลังแก้งานที่ 3
 

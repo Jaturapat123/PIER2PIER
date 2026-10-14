@@ -329,11 +329,26 @@ Learner Lab บล็อกทั้งคู่ และ `list-open-id-connect
 **ผลจริง** `terraform validate` → `Success!` · ไม่มี resource/data ของ CloudFront เหลือใน `infra/`
 (คำว่า CloudFront ที่ยังค้นเจอเป็นคอมเมนต์อธิบายว่าทำไมต้องเอาออก ซึ่งตั้งใจเก็บไว้ใช้เขียนรายงาน)
 
-**เพิ่มเติมที่ไม่ได้อยู่ในแผนเดิม** bucket policy ต้องให้ `s3:ListBucket` แบบ public ด้วย ไม่ใช่แค่ `s3:GetObject`
-เพราะถ้าไม่มี S3 จะตอบ 403 เมื่อหาไฟล์ไม่เจอ (เพื่อไม่บอกว่าไฟล์นั้นมีอยู่จริงหรือไม่)
-แล้ว ErrorDocument จะไม่ถูกส่งกลับอย่างที่ควร → SPA routing พังทั้งหมด
-เมื่อมี `ListBucket` จะได้ 404 แล้ว S3 ส่ง `index.html` กลับให้ตามที่ออกแบบไว้
-ข้อแลกเปลี่ยน: ใคร ๆ ก็เรียกดูรายชื่อไฟล์ใน bucket ได้ — ห้ามเอาไฟล์ที่ไม่ควรเปิดเผยไปวางใน bucket นี้
+**เพิ่มเติมที่ไม่ได้อยู่ในแผนเดิม** bucket policy ให้ `s3:ListBucket` แบบ public ด้วย ไม่ใช่แค่ `s3:GetObject`
+เพื่อให้ได้ status **404** ไม่ใช่ 403 ตอนหาไฟล์ไม่เจอ (ไม่มี ListBucket S3 จะตอบ 403
+เพื่อไม่เปิดเผยว่าไฟล์นั้นมีอยู่จริงหรือไม่)
+
+> ⚠️ **แก้ข้อความเดิมที่อ้างเกินหลักฐาน (พบตอน scrutinize 14 ต.ค.)**
+> เดิมเขียนว่า "ถ้าไม่มี ListBucket → ErrorDocument ไม่ถูกส่งกลับ → SPA routing พังทั้งหมด" — **ไม่จริง**
+> เอกสาร AWS ระบุว่า custom error document ถูกส่งกลับสำหรับ **4XX ทั้งคลาส ซึ่งรวม 403**
+> `ListBucket` จึงมีผลต่อ **เลข status เท่านั้น** ไม่ใช่ตัวตัดสินว่าได้ `index.html` หรือไม่
+> https://docs.aws.amazon.com/AmazonS3/latest/userguide/CustomErrorDocSupport.html
+
+**ยังไม่ได้ยืนยันกับ bucket จริง** — ตอนงานที่ 4 ยิงคำสั่งนี้ตัดสินแล้วแก้โค้ดให้ตรงผล
+
+```bash
+curl -i http://<web_endpoint>/route/ที่ไม่มีไฟล์จริง
+```
+
+ถ้าได้ 403 พร้อมเนื้อ `index.html` → **ถอด `s3:ListBucket` ออกได้** ได้ least privilege กลับมา
+และไม่ต้องเปิดให้คนทั่วไป list ไฟล์ใน bucket
+
+ข้อแลกเปลี่ยนของการคงไว้: ใคร ๆ ก็เรียกดูรายชื่อไฟล์ใน bucket ได้ — ห้ามเอาไฟล์ที่ไม่ควรเปิดเผยไปวางใน bucket นี้
 
 **เพิ่ม `aws_s3_bucket_ownership_controls` = `BucketOwnerEnforced`** ปิด ACL ทั้งหมด ให้สิทธิ์มาจาก bucket policy ที่เดียว
 

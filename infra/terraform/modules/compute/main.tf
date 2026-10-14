@@ -21,6 +21,13 @@ variable "db_name" { type = string }
 variable "db_username" { type = string }
 variable "cors_origins" { type = string }
 variable "aws_region" { type = string }
+
+# รับชื่อ log group เข้ามาแทนการประกอบสตริงเอง เพื่อสองเรื่อง
+#   1. สร้าง dependency ให้ Terraform สร้าง log group เสร็จก่อนเครื่องจะ boot
+#      ไม่งั้นสองโมดูลนี้ไม่มีความสัมพันธ์กันเลยและถูกสร้างขนานกัน
+#   2. ชื่อ log group อยู่ที่เดียวคือ module monitoring ไม่หลุดจากกันเวลาใครแก้
+variable "log_group" { type = string }
+
 variable "tags" { type = map(string) }
 
 data "aws_ami" "al2023" {
@@ -71,7 +78,7 @@ resource "aws_instance" "app" {
     ssm_password_path  = var.ssm_parameter_path
     ssm_jwt_path       = "/${var.name}/app/jwt-secret"
     cors_origins       = var.cors_origins
-    log_group          = "/${var.name}/app"
+    log_group          = var.log_group
   })
 
   # เปลี่ยน user-data แล้วให้สร้างเครื่องใหม่ ไม่ใช่แก้เครื่องเดิม

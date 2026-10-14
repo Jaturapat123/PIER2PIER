@@ -236,6 +236,12 @@ ADMIN  /api/admin/users · services · schedules · container-types · bookings
 | `frontend_cdn` | S3 (private, versioning) · CloudFront + OAC · custom error 403/404 → `/index.html` (จำเป็นสำหรับ SPA routing ไม่งั้น refresh หน้า `/bookings` จะ 403) |
 | `monitoring` | CloudWatch log group · alarm: ALB 5xx, UnHealthyHostCount, RDS CPU/FreeStorage · dashboard รวม |
 
+> ⚠️ **ตารางด้านบนเป็นการออกแบบ ณ 6 ก.ย. 2569 ไม่ใช่สถานะปัจจุบัน** — เก็บไว้เป็นบันทึกย้อนหลัง
+> เปลี่ยนไปแล้ว 3 จุดเมื่อ 14 ต.ค. ตอนย้ายไป AWS Academy Learner Lab:
+> `NAT ×1` → **×2 ตัวละ AZ** · `compute` ใช้ **LabInstanceProfile** แทน IAM role ที่สร้างเอง ·
+> **`frontend_cdn` ถูกแทนด้วย `frontend_web`** ที่ใช้ S3 static website hosting เพราะแล็บไม่อนุญาต CloudFront
+> สถานะล่าสุดอยู่ใน [`instruction.md`](../../instruction.md)
+
 **Security:** SG แบบ chain — ALB รับ 0.0.0.0/0:80 → app SG รับ 3000 จาก ALB SG เท่านั้น → db SG รับ 3306 จาก app SG เท่านั้น
 Secret (DB password, JWT secret) เก็บใน **SSM Parameter Store (SecureString)** EC2 ดึงตอน boot
 

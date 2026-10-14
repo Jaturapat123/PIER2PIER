@@ -14,6 +14,7 @@ variable "name" { type = string }
 variable "vpc_cidr" { type = string }
 variable "availability_zones" { type = list(string) }
 variable "enable_nat" { type = bool }
+variable "app_port" { type = number }
 variable "tags" { type = map(string) }
 
 resource "aws_vpc" "this" {
@@ -130,10 +131,25 @@ resource "aws_route_table_association" "private_app" {
   route_table_id = aws_route_table.private[count.index].id
 }
 
+# route table ของชั้น DB แยกจากชั้น app และ "ไม่มี" route 0.0.0.0/0
+#
+# RDS ไม่มีเหตุผลต้องเรียกออกอินเทอร์เน็ตเลย (backup และ patch เป็นงานฝั่ง AWS
+# ที่ไม่ได้วิ่งผ่าน route table ของเรา) การไม่มีเส้นทางออกจึงเป็นการกันอีกชั้น
+# นอกเหนือจาก security group ที่ไม่มี egress rule อยู่แล้ว
+#
+# เดิมชั้น DB ใช้ route table ใบเดียวกับชั้น app ซึ่งมี route ออก NAT
+# ทำให้คำกล่าวในหัวไฟล์และในรายงานว่า "RDS ไม่มีเส้นทางออกอินเทอร์เน็ต" ไม่เป็นความจริง
+resource "aws_route_table" "private_db" {
+  count  = length(var.availability_zones)
+  vpc_id = aws_vpc.this.id
+
+  tags = merge(var.tags, { Name = "${var.name}-rt-db-${var.availability_zones[count.index]}" })
+}
+
 resource "aws_route_table_association" "private_db" {
   count          = length(aws_subnet.private_db)
   subnet_id      = aws_subnet.private_db[count.index].id
-  route_table_id = aws_route_table.private[count.index].id
+  route_table_id = aws_route_table.private_db[count.index].id
 }
 
 # ── VPC Endpoint (ใช้แทน NAT เพื่อประหยัด) ──────────────────────────────
@@ -197,9 +213,12 @@ resource "aws_security_group" "app" {
   # ทำให้ไม่มีใครนอกจาก ALB ยิงเข้าพอร์ตนี้ได้แม้จะอยู่ใน VPC เดียวกัน
   ingress {
     # พอร์ตแอปพลิเคชัน รับจาก ALB เท่านั้น
+    # ต้องมาจาก var.app_port ตัวเดียวกับที่ ALB target group ใช้
+    # ถ้าฝังเลขไว้ตรงนี้แล้วมีคนเปลี่ยน app_port จะได้ ALB ยิงพอร์ตใหม่
+    # แต่ SG อนุญาตพอร์ตเก่า health check ล้มทั้งหมดโดย plan ไม่เตือนอะไร
     description     = "Application port, from ALB security group only"
-    from_port       = 3000
-    to_port         = 3000
+    from_port       = var.app_port
+    to_port         = var.app_port
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }

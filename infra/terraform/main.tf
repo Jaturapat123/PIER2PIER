@@ -24,7 +24,9 @@ module "network" {
   vpc_cidr           = var.vpc_cidr
   availability_zones = var.availability_zones
   enable_nat         = var.enable_nat
-  tags               = local.tags
+  # security group ของชั้นแอปต้องเปิดพอร์ตเดียวกับที่ ALB target group ยิงไป
+  app_port = var.app_port
+  tags     = local.tags
 }
 
 module "ecr" {
@@ -83,6 +85,10 @@ module "compute" {
   # ถ้าใส่ https:// เบราว์เซอร์จะถูกปฏิเสธที่ชั้น CORS ทุกคำขอ
   cors_origins = "http://${module.frontend_web.website_endpoint}"
   aws_region   = var.aws_region
+
+  # รับชื่อ log group จาก monitoring เพื่อให้ Terraform สร้าง log group ให้เสร็จ
+  # ก่อนเครื่อง boot — container ตั้งค่า awslogs driver ชี้ไปที่ group นี้ตอนสตาร์ท
+  log_group = module.monitoring.log_group_name
 
   tags = local.tags
 }

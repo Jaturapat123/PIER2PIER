@@ -81,16 +81,41 @@ sed -i "s|^GIT_SHA=.*|GIT_SHA=$TAG|" /etc/pier2pier.env
 docker stop --time 30 pier2pier-api 2>/dev/null || true
 docker rm pier2pier-api 2>/dev/null || true
 
-docker run -d \
-  --name pier2pier-api \
-  --restart unless-stopped \
-  --env-file /etc/pier2pier.env \
-  -p 3000:3000 \
-  --log-driver awslogs \
+# แยกเป็นฟังก์ชันเพื่อไม่ต้องเขียน docker run ซ้ำสองชุดตอนถอยไปใช้ driver สำรอง
+run_container() {
+  docker run -d \
+    --name pier2pier-api \
+    --restart unless-stopped \
+    --env-file /etc/pier2pier.env \
+    -p 3000:3000 \
+    "$@" \
+    "$REPO:$TAG"
+}
+
+# ส่ง log เข้า CloudWatch เป็นทางหลัก แล้วถอยไปเก็บบนเครื่องถ้าสิทธิ์ไม่ถึง
+#
+# ไม่ใส่ awslogs-create-group เพราะ module monitoring สร้าง log group ให้แล้ว
+# ถ้าใส่ไว้ docker จะเรียก logs:CreateLogGroup ทุกครั้งที่สตาร์ท
+# เท่ากับเพิ่มสิทธิ์ที่ต้องมีอีกหนึ่งตัวโดยไม่ได้ประโยชน์
+#
+# awslogs ตรวจสิทธิ์ตอนสตาร์ท ถ้า LabRole ไม่มี logs:CreateLogStream หรือ
+# logs:PutLogEvents แล้ว docker run จะล้มเหลวและ container ไม่ขึ้นเลย
+# เนื้อ VocLabPolicy ของแล็บอ่านไม่ได้ (iam:GetPolicy ถูก deny) จึงยืนยันล่วงหน้าไม่ได้
+# การถอยไป json-file ทำให้ระบบยังขึ้นได้ ดีกว่า deploy ล้มทั้งรอบเพราะเรื่อง log
+if ! run_container --log-driver awslogs \
   --log-opt awslogs-region="$REGION" \
-  --log-opt awslogs-group="${log_group}" \
-  --log-opt awslogs-create-group=true \
-  "$REPO:$TAG"
+  --log-opt awslogs-group="${log_group}"; then
+
+  echo "[deploy] คำเตือน: ส่ง log เข้า CloudWatch ไม่ได้ ถอยไปเก็บ log ไว้บนเครื่อง"
+  echo "[deploy] ดู log ด้วย docker logs pier2pier-api (เข้าเครื่องผ่าน SSM Session Manager)"
+  echo "[deploy] ถ้าเจอข้อความนี้ ให้เขียนเป็นข้อจำกัดในรายงานว่า log ไม่ได้รวมศูนย์"
+
+  # docker run ที่ล้มเพราะ logging driver อาจทิ้ง container ที่สร้างแล้วแต่ไม่ได้สตาร์ทไว้
+  docker rm -f pier2pier-api 2> /dev/null || true
+
+  # จำกัดขนาด log ไม่ให้กินดิสก์จนเครื่องเต็ม (20MB ต่อไฟล์ เก็บ 3 ไฟล์)
+  run_container --log-driver json-file --log-opt max-size=20m --log-opt max-file=3
+fi
 
 # รอให้แอปพร้อมจริงก่อนคืนค่า ไม่งั้น CI/CD จะไป deploy เครื่องถัดไปทั้งที่เครื่องนี้ยังไม่ขึ้น
 for i in $(seq 1 30); do
