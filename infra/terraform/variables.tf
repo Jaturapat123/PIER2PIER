@@ -11,9 +11,9 @@ variable "environment" {
 }
 
 variable "aws_region" {
-  description = "ภูมิภาคที่ deploy — สิงคโปร์ใกล้ไทยที่สุดจึง latency ต่ำสุด"
+  description = "ภูมิภาคที่ deploy — AWS Academy Learner Lab ใช้ได้เฉพาะ us-east-1 และ us-west-2"
   type        = string
-  default     = "ap-southeast-1"
+  default     = "us-east-1"
 }
 
 variable "vpc_cidr" {
@@ -24,7 +24,7 @@ variable "vpc_cidr" {
 variable "availability_zones" {
   description = "ต้องมีอย่างน้อย 2 AZ ไม่งั้น ALB สร้างไม่ได้ และ HA ไม่มีความหมาย"
   type        = list(string)
-  default     = ["ap-southeast-1a", "ap-southeast-1b"]
+  default     = ["us-east-1a", "us-east-1b"]
 
   validation {
     condition     = length(var.availability_zones) >= 2

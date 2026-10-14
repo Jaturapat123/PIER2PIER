@@ -2,11 +2,12 @@
 
 project     = "pier2pier"
 environment = "dev"
-aws_region  = "ap-southeast-1"
+aws_region  = "us-east-1"
 
-# ช่วงพัฒนา: Single-AZ ประหยัดกว่าครึ่งหนึ่ง
-# ตอนสาธิต Stage 3: เปลี่ยนเป็น true เพื่อแสดง failover ของฐานข้อมูล
-db_multi_az = false
+# Multi-AZ: standby ใน AZ-b ใช้สำหรับ failover เท่านั้น รับ query ไม่ได้
+# EC2 ทั้งสองเครื่องต่อผ่าน endpoint เดียวกัน ตอน failover RDS สลับ DNS ให้เอง
+# ค่า RDS คูณสอง — ถ้าต้องการประหยัดช่วงพัฒนาให้ตั้ง false ชั่วคราว
+db_multi_az = true
 
 db_password = "เปลี่ยนเป็นรหัสผ่านที่คาดเดายาก"
 jwt_secret  = "สร้างด้วย openssl rand -base64 48"

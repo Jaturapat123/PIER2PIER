@@ -77,23 +77,23 @@ module "compute" {
   db_host            = module.database.address
   db_name            = var.db_name
   db_username        = var.db_username
-  # ผู้ใช้เรียก API ผ่านโดเมนของ CloudFront ซึ่งเป็นโดเมนเดียวกับหน้าเว็บ
-  # จึงเป็น same-origin และไม่เกิดคำขอแบบ cross-origin เลย
-  # ค่านี้ตั้งไว้เผื่อกรณีที่มีใครยิงตรงมาที่ ALB เท่านั้น
-  cors_origins = "https://${module.frontend_cdn.domain_name}"
+  # หน้าเว็บอยู่ที่ S3 website endpoint แต่ API อยู่ที่ ALB — คนละ origin กัน
+  # ทุกคำขอจาก frontend จึงเป็น cross-origin จริง CORS จึงเป็นของบังคับ ไม่ใช่เผื่อไว้
+  # ต้องเป็น http:// เพราะ S3 website endpoint ไม่รองรับ HTTPS
+  # ถ้าใส่ https:// เบราว์เซอร์จะถูกปฏิเสธที่ชั้น CORS ทุกคำขอ
+  cors_origins = "http://${module.frontend_web.website_endpoint}"
   aws_region   = var.aws_region
 
   tags = local.tags
 }
 
-module "frontend_cdn" {
-  source = "./modules/frontend_cdn"
+module "frontend_web" {
+  source = "./modules/frontend_web"
 
+  # ไม่ต้องรับ dns_name ของ ALB อีกแล้ว — เดิมส่งเข้ามาเพื่อให้ CloudFront
+  # ใช้ ALB เป็น origin ที่สองสำหรับ /api/* ตอนนี้ frontend เรียก ALB เองโดยตรง
   name = local.name
-  # CloudFront เป็นทางเข้าเดียวของทั้งเว็บและ API เพื่อให้ผู้ใช้คุยกับโดเมนเดียว
-  # ผ่าน HTTPS ตลอด — ไม่มี mixed content และไม่ต้องตั้ง CORS
-  alb_domain_name = module.alb.dns_name
-  tags            = local.tags
+  tags = local.tags
 }
 
 module "monitoring" {

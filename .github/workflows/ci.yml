@@ -92,7 +92,9 @@ jobs:
 
       - uses: hashicorp/setup-terraform@v4
         with:
-          terraform_version: '1.9.8'
+          # ต้องตรงกับเวอร์ชันที่ทีมใช้บนเครื่องตัวเอง ไม่งั้น terraform fmt -check
+          # อาจผ่านบนเครื่องแต่ fail ใน CI เพราะกฎการจัดรูปแบบต่างกันระหว่างเวอร์ชัน
+          terraform_version: '1.16.5'
 
       - name: ตรวจการจัดรูปแบบ
         run: terraform fmt -check -recursive

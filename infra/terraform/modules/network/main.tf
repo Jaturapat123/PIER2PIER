@@ -73,20 +73,20 @@ resource "aws_subnet" "private_db" {
 
 # ── NAT และเส้นทาง ──────────────────────────────────────────────────────
 
-# NAT ตัวเดียวพอสำหรับโครงงานนี้ — ถ้าทำ production จริงควรมีตัวหนึ่งต่อ AZ
-# เพราะถ้า AZ ที่มี NAT ล่ม EC2 ในอีก AZ จะออกเน็ตไม่ได้
+# NAT ตัวหนึ่งต่อ AZ ตามที่ AWS แนะนำ — ถ้าใช้ตัวเดียวข้าม AZ แล้ว AZ ที่มี NAT ล่ม
+# เครื่องในอีก AZ จะออกเน็ตไม่ได้ (ดึง image จาก ECR และส่ง log ไม่ได้)
 resource "aws_eip" "nat" {
-  count  = var.enable_nat ? 1 : 0
+  count  = var.enable_nat ? length(var.availability_zones) : 0
   domain = "vpc"
-  tags   = merge(var.tags, { Name = "${var.name}-nat-eip" })
+  tags   = merge(var.tags, { Name = "${var.name}-nat-eip-${var.availability_zones[count.index]}" })
 }
 
 resource "aws_nat_gateway" "this" {
-  count = var.enable_nat ? 1 : 0
+  count = var.enable_nat ? length(var.availability_zones) : 0
 
-  allocation_id = aws_eip.nat[0].id
-  subnet_id     = aws_subnet.public[0].id
-  tags          = merge(var.tags, { Name = "${var.name}-nat" })
+  allocation_id = aws_eip.nat[count.index].id
+  subnet_id     = aws_subnet.public[count.index].id
+  tags          = merge(var.tags, { Name = "${var.name}-nat-${var.availability_zones[count.index]}" })
 
   depends_on = [aws_internet_gateway.this]
 }
@@ -102,18 +102,20 @@ resource "aws_route_table" "public" {
   tags = merge(var.tags, { Name = "${var.name}-rt-public" })
 }
 
+# route table แยกใบต่อ AZ เพื่อให้ subnet ใน AZ ไหนวิ่งออก NAT ของ AZ นั้น
 resource "aws_route_table" "private" {
+  count  = length(var.availability_zones)
   vpc_id = aws_vpc.this.id
 
   dynamic "route" {
     for_each = var.enable_nat ? [1] : []
     content {
       cidr_block     = "0.0.0.0/0"
-      nat_gateway_id = aws_nat_gateway.this[0].id
+      nat_gateway_id = aws_nat_gateway.this[count.index].id
     }
   }
 
-  tags = merge(var.tags, { Name = "${var.name}-rt-private" })
+  tags = merge(var.tags, { Name = "${var.name}-rt-private-${var.availability_zones[count.index]}" })
 }
 
 resource "aws_route_table_association" "public" {
@@ -125,13 +127,13 @@ resource "aws_route_table_association" "public" {
 resource "aws_route_table_association" "private_app" {
   count          = length(aws_subnet.private_app)
   subnet_id      = aws_subnet.private_app[count.index].id
-  route_table_id = aws_route_table.private.id
+  route_table_id = aws_route_table.private[count.index].id
 }
 
 resource "aws_route_table_association" "private_db" {
   count          = length(aws_subnet.private_db)
   subnet_id      = aws_subnet.private_db[count.index].id
-  route_table_id = aws_route_table.private.id
+  route_table_id = aws_route_table.private[count.index].id
 }
 
 # ── VPC Endpoint (ใช้แทน NAT เพื่อประหยัด) ──────────────────────────────
@@ -142,7 +144,7 @@ resource "aws_vpc_endpoint" "s3" {
   vpc_id            = aws_vpc.this.id
   service_name      = "com.amazonaws.${data.aws_region.current.name}.s3"
   vpc_endpoint_type = "Gateway"
-  route_table_ids   = [aws_route_table.private.id]
+  route_table_ids   = aws_route_table.private[*].id
 
   tags = merge(var.tags, { Name = "${var.name}-vpce-s3" })
 }

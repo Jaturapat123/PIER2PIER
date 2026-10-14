@@ -17,8 +17,13 @@ on:
         required: true
         type: string
 
+# ใช้ OIDC ไม่ได้ใน Learner Lab จึงไม่ต้องขอ id-token — ดูเหตุผลเต็มใน deploy.yml
+# ต้องมี AWS_ACCESS_KEY_ID · AWS_SECRET_ACCESS_KEY · AWS_SESSION_TOKEN ใน GitHub Secrets
+# และค่าเหล่านี้หมดอายุทุกครั้งที่ปิดแล็บ
+#
+# ข้อควรระวังตอนสาธิต: ถ้า credential หมดอายุ rollback จะล้มเหลวตั้งแต่ขั้นแรก
+# ให้ไปหยิบค่าใหม่จากหน้า AWS Details ก่อนเริ่มสาธิตทุกครั้ง
 permissions:
-  id-token: write
   contents: read
 
 concurrency:
@@ -26,7 +31,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: ap-southeast-1
+  # Learner Lab อนุญาตเฉพาะ us-east-1 และ us-west-2
+  AWS_REGION: us-east-1
   PROJECT: pier2pier-dev
 
 jobs:
@@ -37,7 +43,9 @@ jobs:
     steps:
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: ตรวจว่ามี image แท็กนี้อยู่จริง

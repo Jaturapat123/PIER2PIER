@@ -3,19 +3,14 @@ output "alb_dns_name" {
   value       = module.alb.dns_name
 }
 
-output "cloudfront_domain" {
-  description = "ที่อยู่เว็บไซต์สำหรับผู้ใช้"
-  value       = module.frontend_cdn.domain_name
+output "web_endpoint" {
+  description = "ที่อยู่เว็บไซต์สำหรับผู้ใช้ — HTTP เท่านั้น S3 website endpoint ไม่รองรับ HTTPS"
+  value       = "http://${module.frontend_web.website_endpoint}"
 }
 
 output "frontend_bucket" {
   description = "S3 bucket ที่ CI/CD อัปโหลดไฟล์ frontend ขึ้นไป"
-  value       = module.frontend_cdn.bucket_name
-}
-
-output "cloudfront_distribution_id" {
-  description = "ใช้สั่ง invalidate cache หลัง deploy frontend"
-  value       = module.frontend_cdn.distribution_id
+  value       = module.frontend_web.bucket_name
 }
 
 output "ecr_repository_url" {

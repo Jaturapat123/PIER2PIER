@@ -7,11 +7,21 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# ต้องมี id-token: write เพื่อขอ OIDC token จาก GitHub
-# แลกเป็น temporary credential ของ AWS — วิธีนี้ไม่ต้องเก็บ access key
-# เป็น secret ที่ไม่มีวันหมดอายุไว้ใน GitHub เลย
+# ไม่ขอ id-token อีกแล้ว เพราะใช้ OIDC ไม่ได้
+#
+# เดิมใช้ GitHub OIDC แลก temporary credential ซึ่งปลอดภัยกว่าและไม่ต้องเก็บ secret
+# แต่ AWS Academy Learner Lab สร้าง IAM role ให้ GitHub ไม่ได้ —
+# `aws iam list-open-id-connect-providers` คืนค่าว่าง และ `iam:CreateRole` ถูกปฏิเสธ
+# (ยืนยันจากบัญชีจริง ดู instruction.md §2.5)
+#
+# จึงต้องใช้ credential ชั่วคราวจากหน้า "AWS Details" ของแล็บ ซึ่งมีสามค่า
+# และ **หมดอายุทุกครั้งที่ปิดแล็บ** ผู้ดูแล repo ต้องเอาค่าใหม่ไปใส่
+# Settings → Secrets and variables → Actions ทุกครั้งที่เริ่ม session ใหม่:
+#   AWS_ACCESS_KEY_ID · AWS_SECRET_ACCESS_KEY · AWS_SESSION_TOKEN
+#
+# ต้องมี AWS_SESSION_TOKEN ด้วย — credential ของแล็บเป็นแบบ STS ชั่วคราว
+# ถ้าใส่แค่สองค่าแรก ทุกคำสั่ง aws จะได้ InvalidClientTokenId
 permissions:
-  id-token: write
   contents: read
 
 # ห้าม deploy ซ้อนกัน ถ้ามีตัวใหม่มาให้รอตัวเก่าจบก่อน
@@ -21,7 +31,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: ap-southeast-1
+  # Learner Lab อนุญาตเฉพาะ us-east-1 และ us-west-2
+  AWS_REGION: us-east-1
   PROJECT: pier2pier-dev
 
 jobs:
@@ -79,7 +90,9 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - uses: aws-actions/amazon-ecr-login@v2
@@ -109,7 +122,9 @@ jobs:
     steps:
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: หา instance และ target group
@@ -199,19 +214,38 @@ jobs:
 
       - uses: aws-actions/configure-aws-credentials@v6
         with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Build
-        # ไม่ต้องฝังที่อยู่ API ลงไป เพราะ CloudFront ส่งต่อ /api/* ไปยัง ALB ให้แล้ว
-        # หน้าเว็บจึงเรียก API ด้วย path สัมพัทธ์บนโดเมนเดียวกัน
+      - name: หาที่อยู่ของ API ที่จะฝังลงไปตอน build
+        id: api
+        # ไม่มี CloudFront แล้ว หน้าเว็บ (S3) กับ API (ALB) จึงอยู่คนละ origin
+        # frontend ต้องรู้ที่อยู่ของ ALB ตั้งแต่ตอน build เพราะ Vite แทนค่า
+        # import.meta.env ลงไปในไฟล์ JS ตอน build ไม่ใช่ตอน runtime
+        # เปลี่ยนที่อยู่ API ทีหลังโดยไม่ build ใหม่จึงทำไม่ได้
         #
-        # ถ้าฝัง http://<alb> ลงไปตรง ๆ เบราว์เซอร์จะบล็อกทุกคำขอ
-        # เพราะหน้าเว็บเสิร์ฟผ่าน HTTPS แต่ปลายทางเป็น HTTP (mixed content)
+        # อ่านจาก ALB จริงด้วย describe-load-balancers แทนการเก็บเป็น secret
+        # เพราะชื่อ DNS ของ ALB เปลี่ยนทุกครั้งที่ terraform สร้างใหม่
+        # ซึ่งในแล็บเกิดบ่อยเพราะต้อง destroy ทิ้งเพื่อคุมงบ
+        run: |
+          set -euo pipefail
+          ALB=$(aws elbv2 describe-load-balancers --names "${PROJECT}-alb" \
+                  --query "LoadBalancers[0].DNSName" --output text)
+          echo "base_url=http://$ALB" >> "$GITHUB_OUTPUT"
+          echo "จะ build ให้ frontend เรียก API ที่ http://$ALB"
+
+      - name: Build
+        # เป็น http:// ไม่ใช่ https:// เพราะ ALB ไม่มีใบรับรอง ACM
+        # และไม่เกิด mixed content เพราะหน้าเว็บที่เสิร์ฟจาก S3 website endpoint
+        # ก็เป็น HTTP เหมือนกัน — ทั้งระบบเป็น HTTP ทั้งหมด (ข้อจำกัดของ Learner Lab)
         run: |
           npm ci
           npm run build
         working-directory: frontend
+        env:
+          VITE_API_BASE_URL: ${{ steps.api.outputs.base_url }}
 
       - name: อัปโหลดขึ้น S3
         run: |
@@ -227,8 +261,24 @@ jobs:
             --cache-control "no-cache,no-store,must-revalidate"
         working-directory: frontend
 
-      - name: ล้าง cache ของ CloudFront
+      # เดิมมีขั้นตอน "ล้าง cache ของ CloudFront" ตรงนี้ — ลบออกแล้วเพราะไม่มี CloudFront
+      # ไม่มีอะไรต้องล้างแทน: ไฟล์ asset มี hash ในชื่อจึงเปลี่ยนชื่อเองเมื่อเนื้อหาเปลี่ยน
+      # และ index.html อัปโหลดด้วย no-cache อยู่แล้ว เบราว์เซอร์จึงเห็นของใหม่ทันที
+
+      - name: สรุปที่อยู่หน้าเว็บ
         run: |
-          DIST=$(aws cloudfront list-distributions \
-            --query "DistributionList.Items[?Comment=='${PROJECT} frontend'].Id | [0]" --output text)
-          aws cloudfront create-invalidation --distribution-id "$DIST" --paths "/*"
+          set -euo pipefail
+          # ประกอบชื่อเองเพราะ AWS CLI ไม่มีคำสั่งที่คืน website endpoint ให้
+          # (get-bucket-website บอกแค่ index/error document) ค่าที่เชื่อถือได้คือ
+          # output `web_endpoint` ของ Terraform — ตรงนี้ใช้แค่แสดงใน summary
+          # รูปแบบใช้ขีดคั่น (s3-website-<region>) ซึ่งถูกต้องสำหรับ us-east-1
+          BUCKET="${PROJECT}-web"
+          ENDPOINT="http://${BUCKET}.s3-website-${AWS_REGION}.amazonaws.com"
+
+          {
+            echo "### Frontend ขึ้นแล้ว"
+            echo ""
+            echo "- หน้าเว็บ: $ENDPOINT"
+            echo "- API ที่ฝังไว้ตอน build: ${{ steps.api.outputs.base_url }}"
+            echo "- ทั้งคู่เป็น HTTP — S3 website endpoint ไม่รองรับ HTTPS"
+          } >> "$GITHUB_STEP_SUMMARY"

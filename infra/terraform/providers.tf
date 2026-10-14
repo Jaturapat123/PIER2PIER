@@ -13,7 +13,7 @@ terraform {
   # backend "s3" {
   #   bucket         = "pier2pier-tfstate"
   #   key            = "wms/terraform.tfstate"
-  #   region         = "ap-southeast-1"
+  #   region         = "us-east-1"
   #   dynamodb_table = "pier2pier-tflock"
   #   encrypt        = true
   # }

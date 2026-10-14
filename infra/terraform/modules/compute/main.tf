@@ -35,56 +35,16 @@ data "aws_ami" "al2023" {
 
 # ── สิทธิ์ของเครื่อง ─────────────────────────────────────────────────────
 
-resource "aws_iam_role" "instance" {
-  name = "${var.name}-instance-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ec2.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-
-  tags = var.tags
-}
-
-# ดึง image จาก ECR ได้ แต่ push ไม่ได้ — เครื่อง production ไม่มีเหตุผลต้อง push
-resource "aws_iam_role_policy_attachment" "ecr_readonly" {
-  role       = aws_iam_role.instance.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-}
-
-# ใช้ SSM Session Manager แทน SSH — ไม่ต้องเปิดพอร์ต 22 และไม่ต้องเก็บ key ที่ไหนเลย
-resource "aws_iam_role_policy_attachment" "ssm" {
-  role       = aws_iam_role.instance.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_role_policy_attachment" "cloudwatch" {
-  role       = aws_iam_role.instance.name
-  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
-}
-
-# อ่านความลับได้เฉพาะของโครงงานนี้เท่านั้น ไม่ใช่ทุก parameter ในบัญชี
-resource "aws_iam_role_policy" "ssm_params" {
-  name = "${var.name}-read-parameters"
-  role = aws_iam_role.instance.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = ["ssm:GetParameter", "ssm:GetParameters"]
-      Resource = "arn:aws:ssm:${var.aws_region}:*:parameter/${var.name}/*"
-    }]
-  })
-}
-
-resource "aws_iam_instance_profile" "this" {
-  name = "${var.name}-instance-profile"
-  role = aws_iam_role.instance.name
+# AWS Academy Learner Lab สร้าง IAM role เองไม่ได้ (สร้างได้แค่ service-linked role)
+# จึงต้องใช้ LabRole ที่แล็บเตรียมไว้ ผ่าน instance profile ชื่อ LabInstanceProfile
+#
+# LabRole มี AmazonEC2ContainerRegistryReadOnly (docker pull) และ
+# AmazonSSMManagedInstanceCore (Session Manager + อ่าน SSM parameter) ครบตามที่ user-data ต้องใช้
+#
+# ข้อเสียที่ยอมรับ: เดิมจำกัดให้เครื่องอ่านได้เฉพาะ parameter ใต้ path ของโครงงาน (least privilege)
+# LabRole กว้างกว่านั้นมากและแก้ไม่ได้ — ต้องระบุเป็นข้อจำกัดในรายงาน
+data "aws_iam_instance_profile" "lab" {
+  name = "LabInstanceProfile"
 }
 
 # ── เครื่อง ─────────────────────────────────────────────────────────────
@@ -98,7 +58,7 @@ resource "aws_instance" "app" {
   # เครื่องที่ 0 จึงอยู่ AZ-a และเครื่องที่ 1 อยู่ AZ-b เสมอ
   subnet_id              = var.subnet_ids[count.index % length(var.subnet_ids)]
   vpc_security_group_ids = [var.security_group_id]
-  iam_instance_profile   = aws_iam_instance_profile.this.name
+  iam_instance_profile   = data.aws_iam_instance_profile.lab.name
 
   user_data = templatefile("${path.module}/user-data.sh", {
     aws_region         = var.aws_region

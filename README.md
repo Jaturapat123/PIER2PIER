@@ -44,7 +44,7 @@ jekcloud/
 │   │   ├── middleware/         auth (JWT) · validate (zod) · error handler
 │   │   ├── routes/             health · auth · services · schedules · bookings · admin/*
 │   │   └── services/           booking.service.js (โควตา) · report.service.js
-│   ├── tests/                  Jest + Supertest (30 เทสต์)
+│   ├── tests/                  Jest + Supertest (31 เทสต์)
 │   └── Dockerfile
 │
 ├── frontend/               React 18 + Vite + TypeScript + Tailwind
@@ -53,7 +53,7 @@ jekcloud/
 │       ├── lib/                api.ts · auth.tsx · format.ts · types.ts
 │       └── pages/              หน้าลูกค้า + pages/admin/ (9 หน้า)
 │
-├── infra/terraform/        VPC · ALB · EC2 · RDS · S3+CloudFront · ECR · CloudWatch
+├── infra/terraform/        VPC · ALB · EC2 · RDS · S3 static website · ECR · CloudWatch
 │   └── modules/
 │
 ├── .github/workflows/      ci.yml · deploy.yml · rollback.yml
@@ -104,7 +104,10 @@ terraform plan       # ตรวจดูว่าจะสร้างอะไ
 terraform apply
 ```
 
-Terraform จะแสดง `alb_dns_name`, `cloudfront_domain` และ `ecr_repository_url`
+Terraform จะแสดง `alb_dns_name`, `web_endpoint` และ `ecr_repository_url`
+
+> `web_endpoint` คือที่อยู่หน้าเว็บ รูปแบบ `http://pier2pier-dev-web.s3-website-us-east-1.amazonaws.com`
+> **เป็น HTTP เท่านั้น** — S3 website endpoint ไม่รองรับ HTTPS และ Learner Lab ใช้ CloudFront ไม่ได้
 เมื่อสร้างเสร็จ
 
 ### ตั้งค่า GitHub

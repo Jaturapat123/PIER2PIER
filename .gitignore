@@ -11,4 +11,8 @@ infra/terraform/*.tfstate
 infra/terraform/*.tfstate.*
 infra/terraform/*.tfvars
 !infra/terraform/*.tfvars.example
-.terraform.lock.hcl
+
+# .terraform.lock.hcl ตั้งใจให้ขึ้น git — ไม่ใช่ความลับและไม่ใช่ state
+# ไฟล์นี้ตรึง version + checksum ของ provider ที่ใช้จริง ถ้าไม่ commit
+# สมาชิกแต่ละคนรัน terraform init ต่างวันจะได้ provider ต่างเวอร์ชันกัน
+# แล้ว plan ของแต่ละคนจะไม่เหมือนกันโดยไม่มีใครรู้สาเหตุ
