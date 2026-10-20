@@ -42,8 +42,8 @@ for ((batch = 0; batch < TOTAL; batch += CONCURRENCY)); do
       meta=$(echo "$body" | tail -1)
       json=$(echo "$body" | head -n -1)
 
-      host=$(echo "$json" | grep -o '"hostname":"[^"]*"' | cut -d'"' -f4)
-      az=$(echo "$json" | grep -o '"availabilityZone":"[^"]*"' | cut -d'"' -f4)
+      host=$(echo "$json" | grep -o '"hostname":"[^"]*"' | cut -d'"' -f4 || true)
+      az=$(echo "$json" | grep -o '"availabilityZone":"[^"]*"' | cut -d'"' -f4 || true)
       code=$(echo "$meta" | cut -d' ' -f1)
       secs=$(echo "$meta" | cut -d' ' -f2)
 
@@ -68,7 +68,7 @@ printf '\n\n'
   echo ""
   echo "การกระจายคำขอไปยังแต่ละเครื่อง"
   echo "----------------------------------------"
-  awk '{print $1, $2}' "$RAW" | sort | uniq -c | sort -rn \
+  awk '$3 == "200" && $1 != "UNKNOWN" {print $1, $2}' "$RAW" | sort | uniq -c | sort -rn \
     | awk -v total="$TOTAL" '{printf "  %6d คำขอ (%5.1f%%)  %s  [%s]\n", $1, $1/total*100, $2, $3}'
   echo ""
   echo "สถานะที่ได้รับ"
@@ -83,12 +83,14 @@ printf '\n\n'
   echo ""
   echo "สรุป"
   echo "----------------------------------------"
-  hosts=$(awk '{print $1}' "$RAW" | grep -v ERROR | sort -u | wc -l)
-  errors=$(grep -c ERROR "$RAW" || true)
+  hosts=$(awk '$3 == "200" && $1 != "UNKNOWN" {print $1}' "$RAW" | sort -u | wc -l)
+  azs=$(awk '$3 == "200" && $2 != "UNKNOWN" {print $2}' "$RAW" | sort -u | wc -l)
+  errors=$(awk '$3 != "200" || $1 == "UNKNOWN" || $2 == "UNKNOWN" {n++} END {print n+0}' "$RAW")
   echo "  จำนวนเครื่องที่ตอบ : $hosts"
+  echo "  จำนวน AZ ที่ตอบ    : $azs"
   echo "  คำขอที่ล้มเหลว     : $errors"
-  if [ "$hosts" -ge 2 ] && [ "$errors" -eq 0 ]; then
-    echo "  ผลลัพธ์: ผ่าน — Load Balancer กระจายคำขอไปหลายเครื่องโดยไม่มีคำขอใดล้มเหลว"
+  if [ "$hosts" -ge 2 ] && [ "$azs" -ge 2 ] && [ "$errors" -eq 0 ]; then
+    echo "  ผลลัพธ์: ผ่าน — Load Balancer กระจายคำขอไปสอง AZ โดยทุกคำขอได้ HTTP 200"
   elif [ "$hosts" -lt 2 ]; then
     echo "  ผลลัพธ์: ต้องตรวจสอบ — มีเครื่องตอบเพียงเครื่องเดียว"
   else

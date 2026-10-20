@@ -17,6 +17,8 @@ set -euo pipefail
 MODE="${1:-local}"
 BASE_URL="${2:-http://localhost:8080}"
 TARGET="${3:-wms-api-a}"
+TARGET_STOP_REQUESTED=false
+TARGET_START_REQUESTED=false
 
 OUT_DIR="$(dirname "$0")/../results"
 mkdir -p "$OUT_DIR"
@@ -31,6 +33,7 @@ echo "  เป้าหมาย : $TARGET"
 echo ""
 
 stop_target() {
+  TARGET_STOP_REQUESTED=true
   if [ "$MODE" = "aws" ]; then
     aws ec2 stop-instances --instance-ids "$TARGET" > /dev/null
   else
@@ -44,7 +47,28 @@ start_target() {
   else
     docker start "$TARGET" > /dev/null
   fi
+  TARGET_START_REQUESTED=true
 }
+
+cleanup() {
+  kill "${POLL_PID:-}" 2>/dev/null || true
+  if [ "$TARGET_STOP_REQUESTED" = true ] && [ "$TARGET_START_REQUESTED" = false ]; then
+    echo "การทดสอบหยุดก่อนจบ — กำลังเปิด $TARGET กลับ" >&2
+    start_target || echo "เปิด $TARGET ไม่สำเร็จ ต้องตรวจสถานะด้วยตนเอง" >&2
+  fi
+}
+
+trap cleanup EXIT
+
+if [ "$MODE" = "aws" ]; then
+  DETAILS=$(aws ec2 describe-instances --instance-ids "$TARGET" \
+    --query 'Reservations[0].Instances[0].[State.Name,Tags[?Key==`Project`]|[0].Value,Tags[?Key==`Role`]|[0].Value]' \
+    --output text)
+  if [ "$DETAILS" != $'running\tpier2pier\tapplication' ]; then
+    echo "ปฏิเสธการหยุด EC2: $TARGET ต้องเป็นเครื่อง application ของ pier2pier ที่กำลัง running" >&2
+    exit 1
+  fi
+fi
 
 : > "$RAW"
 
@@ -52,18 +76,22 @@ start_target() {
 poll() {
   while :; do
     now=$(date +%s.%N)
-    if body=$(curl -sS -m 3 "$BASE_URL/health" 2>/dev/null); then
-      host=$(echo "$body" | grep -o '"hostname":"[^"]*"' | cut -d'"' -f4)
-      echo "$now OK ${host:-UNKNOWN}" >> "$RAW"
+    if response=$(curl -sS -m 3 -w '\n%{http_code}' "$BASE_URL/health" 2>/dev/null); then
+      code=$(printf '%s\n' "$response" | tail -1)
+      host=$(printf '%s\n' "$response" | grep -o '"hostname":"[^"]*"' | cut -d'"' -f4 || true)
+      if [ "$code" = 200 ]; then
+        echo "$now OK ${host:-UNKNOWN} $code" >> "$RAW"
+      else
+        echo "$now FAIL ${host:-UNKNOWN} $code" >> "$RAW"
+      fi
     else
-      echo "$now FAIL -" >> "$RAW"
+      echo "$now FAIL - 000" >> "$RAW"
     fi
     sleep 0.2
   done
 }
 
 poll & POLL_PID=$!
-trap 'kill $POLL_PID 2>/dev/null || true' EXIT
 
 echo "ระยะที่ 1: เก็บข้อมูลตอนระบบปกติ (10 วินาที)"
 sleep 10
@@ -73,12 +101,18 @@ echo "ระยะที่ 2: ปิดเซิร์ฟเวอร์ $TARGE
 CUT_TIME=$(date +%s.%N)
 stop_target
 echo "  ปิดแล้วเมื่อ $(date -Is) — เฝ้าดูต่ออีก 30 วินาที"
+if [ "$MODE" = "aws" ]; then
+  aws ec2 wait instance-stopped --instance-ids "$TARGET"
+fi
 sleep 30
 AFTER_STOP=$(wc -l < "$RAW")
 
 echo "ระยะที่ 3: เปิดเซิร์ฟเวอร์กลับ"
 start_target
 echo "  รอให้ ALB ตรวจสุขภาพผ่านและส่งคำขอกลับมา (60 วินาที)"
+if [ "$MODE" = "aws" ]; then
+  aws ec2 wait instance-running --instance-ids "$TARGET"
+fi
 sleep 60
 
 kill $POLL_PID 2>/dev/null || true
