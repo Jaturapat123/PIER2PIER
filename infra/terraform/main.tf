@@ -13,7 +13,7 @@ locals {
     Environment = var.environment
     ManagedBy   = "terraform"
     Course      = "Cloud Computing 1/2569"
-    Team        = "Pier2Pier (J3K)"
+    Team        = "Pier2Pier J3K"
   }
 }
 
@@ -98,8 +98,9 @@ module "frontend_web" {
 
   # ไม่ต้องรับ dns_name ของ ALB อีกแล้ว — เดิมส่งเข้ามาเพื่อให้ CloudFront
   # ใช้ ALB เป็น origin ที่สองสำหรับ /api/* ตอนนี้ frontend เรียก ALB เองโดยตรง
-  name = local.name
-  tags = local.tags
+  name          = local.name
+  tags          = local.tags
+  manage_bucket = var.manage_frontend_bucket
 }
 
 module "monitoring" {

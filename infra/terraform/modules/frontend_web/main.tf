@@ -17,9 +17,19 @@
 
 variable "name" { type = string }
 variable "tags" { type = map(string) }
+variable "manage_bucket" {
+  type    = bool
+  default = true
+}
+
+locals {
+  bucket_name = "${var.name}-web"
+  bucket_arn  = "arn:aws:s3:::${local.bucket_name}"
+}
 
 resource "aws_s3_bucket" "web" {
-  bucket        = "${var.name}-web"
+  count         = var.manage_bucket ? 1 : 0
+  bucket        = local.bucket_name
   force_destroy = true # โครงงานลบทิ้งบ่อย ระบบจริงต้องเป็น false
 
   tags = merge(var.tags, { Name = "${var.name}-web" })
@@ -36,7 +46,8 @@ resource "aws_s3_bucket" "web" {
  * ถ้าระดับบัญชีเปิดอยู่ การตั้งค่าระดับ bucket จะถูกทับและทำ website hosting ไม่ได้เลย
  */
 resource "aws_s3_bucket_public_access_block" "web" {
-  bucket = aws_s3_bucket.web.id
+  bucket     = local.bucket_name
+  depends_on = [aws_s3_bucket.web]
 
   block_public_acls       = false
   block_public_policy     = false
@@ -47,7 +58,8 @@ resource "aws_s3_bucket_public_access_block" "web" {
 # ปิดการใช้ ACL ทั้งหมด ให้สิทธิ์มาจาก bucket policy ที่เดียว
 # ตรวจสอบง่ายกว่าตอนรายงาน และกันกรณี CI อัปโหลดไฟล์มาด้วย ACL ที่ไม่ตรงกัน
 resource "aws_s3_bucket_ownership_controls" "web" {
-  bucket = aws_s3_bucket.web.id
+  bucket     = local.bucket_name
+  depends_on = [aws_s3_bucket.web]
 
   rule { object_ownership = "BucketOwnerEnforced" }
 }
@@ -66,7 +78,8 @@ resource "aws_s3_bucket_ownership_controls" "web" {
  * ก่อนคำขอถึง origin จึงได้ 200
  */
 resource "aws_s3_bucket_website_configuration" "web" {
-  bucket = aws_s3_bucket.web.id
+  bucket     = local.bucket_name
+  depends_on = [aws_s3_bucket.web]
 
   index_document { suffix = "index.html" }
   error_document { key = "index.html" }
@@ -74,14 +87,16 @@ resource "aws_s3_bucket_website_configuration" "web" {
 
 # เก็บเวอร์ชันเก่าไว้ — ถ้า deploy frontend ผิดพลาด ย้อนไฟล์กลับได้โดยไม่ต้อง build ใหม่
 resource "aws_s3_bucket_versioning" "web" {
-  bucket = aws_s3_bucket.web.id
+  bucket     = local.bucket_name
+  depends_on = [aws_s3_bucket.web]
   versioning_configuration { status = "Enabled" }
 }
 
 # SSE-S3 ทำงานโปร่งใสต่อผู้อ่าน — ไฟล์ถูกเข้ารหัสตอนเก็บ
 # แต่ผู้ใช้ที่ไม่มี credential ยังโหลดผ่าน website endpoint ได้ปกติ
 resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
-  bucket = aws_s3_bucket.web.id
+  bucket     = local.bucket_name
+  depends_on = [aws_s3_bucket.web]
 
   rule {
     apply_server_side_encryption_by_default { sse_algorithm = "AES256" }
@@ -94,21 +109,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
  * มี ListBucket เพิ่มมาจาก GetObject เพื่อให้ได้ status 404 ไม่ใช่ 403 ตอนหาไฟล์ไม่เจอ
  * ถ้าไม่มี ListBucket S3 จะตอบ 403 เพื่อไม่เปิดเผยว่าไฟล์นั้นมีอยู่จริงหรือไม่
  *
- * **ยังไม่ได้ยืนยันกับ bucket จริง** ว่าทางไหนดีกว่า — เอกสาร AWS ระบุว่า
- * error document ถูกส่งกลับสำหรับ 4XX ทั้งคลาส ซึ่งรวม 403 ด้วย
- * แปลว่า SPA routing น่าจะทำงานได้ทั้งสองทาง ต่างกันแค่เลข status
- * เลือกทาง 404 ไว้ก่อนเพราะเป็นเส้นที่เอกสารบรรยายชัดที่สุด
- *
- * ตอนงานที่ 4 ให้ยิงคำสั่งนี้ตัดสิน แล้วแก้ให้ตรงผล:
- *   curl -i http://<endpoint>/route/ที่ไม่มีไฟล์จริง
- * ถ้าได้ 403 พร้อมเนื้อ index.html → ถอด s3:ListBucket ออกได้ ได้ least privilege กลับมา
+ * งานที่ 4 ทดสอบกับ bucket จริงแล้ว: deep route ได้ HTTP 404 พร้อม index.html
  *
  * ข้อแลกเปลี่ยนของการคง ListBucket ไว้: ใคร ๆ ก็เรียกดูรายชื่อไฟล์ใน bucket ได้
  * ซึ่งทั้งหมดเป็นผลลัพธ์ build ของ frontend ที่เป็นข้อมูลสาธารณะอยู่แล้ว
  * ห้ามเอาไฟล์ที่ไม่ควรเปิดเผยมาวางใน bucket นี้เด็ดขาด
  */
 resource "aws_s3_bucket_policy" "web" {
-  bucket = aws_s3_bucket.web.id
+  bucket = local.bucket_name
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -117,15 +125,15 @@ resource "aws_s3_bucket_policy" "web" {
       Effect    = "Allow"
       Principal = "*"
       Action    = ["s3:GetObject", "s3:ListBucket"]
-      Resource  = [aws_s3_bucket.web.arn, "${aws_s3_bucket.web.arn}/*"]
+      Resource  = [local.bucket_arn, "${local.bucket_arn}/*"]
     }]
   })
 
   # ต้องปลด Block Public Access ให้เสร็จก่อน ไม่งั้น S3 ปฏิเสธนโยบายนี้
-  depends_on = [aws_s3_bucket_public_access_block.web]
+  depends_on = [aws_s3_bucket.web, aws_s3_bucket_public_access_block.web]
 }
 
-output "bucket_name" { value = aws_s3_bucket.web.id }
+output "bucket_name" { value = local.bucket_name }
 
 # รูปแบบ: <bucket>.s3-website-us-east-1.amazonaws.com (ไม่มี scheme นำหน้า)
 output "website_endpoint" { value = aws_s3_bucket_website_configuration.web.website_endpoint }

@@ -11,6 +11,7 @@ variable "tags" { type = map(string) }
 resource "aws_ecr_repository" "this" {
   name                 = "${var.name}-api"
   image_tag_mutability = "MUTABLE" # ต้อง MUTABLE เพราะ tag "latest" ถูกเขียนทับทุกครั้ง
+  force_delete         = true      # แล็บต้อง destroy หลังเก็บหลักฐาน แม้ยังมี image อยู่
 
   image_scanning_configuration {
     scan_on_push = true # สแกนช่องโหว่ของ image ทุกครั้งที่ push

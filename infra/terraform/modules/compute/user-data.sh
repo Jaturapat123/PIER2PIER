@@ -53,7 +53,7 @@ chmod 600 /etc/pier2pier.env
 
 # ── ล็อกอิน ECR แล้วดึง image ──────────────────────────────────────────
 aws ecr get-login-password --region "${aws_region}" \
-  | docker login --username AWS --password-stdin "${ecr_repository_url}"
+  | docker login --username AWS --password-stdin "$(printf '%s' '${ecr_repository_url}' | cut -d/ -f1)"
 
 docker pull "${ecr_repository_url}:${image_tag}"
 
@@ -69,7 +69,7 @@ TAG="$3"
 
 echo "[deploy] กำลัง deploy tag: $TAG"
 
-aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REPO"
+aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$(printf '%s' "$REPO" | cut -d/ -f1)"
 docker pull "$REPO:$TAG"
 
 # บันทึก tag ปัจจุบันไว้ใน env เพื่อให้ /health รายงานเวอร์ชันได้ถูกต้อง

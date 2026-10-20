@@ -83,7 +83,7 @@ Trust policy ของ `LabRole` ยอมให้หลายสิบ service
 
 ### 2.6 งบประมาณ
 
-ใช้ไปแล้ว **US$0.23** จาก **$100** (เช็กจากหน้า Console home → Cost and usage)
+บัญชีที่ใช้ทำงานที่ 4 แสดงวงเงิน **US$50** บนหน้าแล็บ (ต่างจากตัวเลข $100 ใน readme); ตรวจยอดใช้จริงใหม่ทุก session
 
 ---
 
@@ -96,7 +96,7 @@ Trust policy ของ `LabRole` ยอมให้หลายสิบ service
 | EC2 หลังจบ session | ถูก stop แล้ว **start ให้เองรอบหน้า** · public IP เปลี่ยนทุกครั้งถ้าไม่ผูก Elastic IP |
 | RDS | type nano–medium (burstable) · gp2 ไม่เกิน 100 GB · **ต้องปิด enhanced monitoring** · **จบ session แล้วแล็บไม่หยุด RDS ให้** มันเดินกินงบต่อ |
 | IAM | สร้าง user / group / role ไม่ได้ (ยกเว้น service-linked) · ใช้ `LabRole` + `LabInstanceProfile` ที่เตรียมไว้ |
-| งบ | **ถ้าเกิน $100 บัญชีถูกปิดและทรัพยากรถูกลบทั้งหมด** ไม่ใช่แค่เตือน |
+| งบ | บัญชีที่ใช้ทำงานที่ 4 แสดงวงเงิน **$50**; ตรวจตัวเลขบนหน้าแล็บของบัญชีตนเองก่อน apply |
 | ตัวกินงบ | readme ระบุเอง: EC2, RDS, **NAT Gateway**, SageMaker, EMR/ECS/EKS, Elastic Beanstalk |
 | Reset lab | ลบทุกอย่างถาวร แต่ **ไม่ล้างงบ** |
 
@@ -104,17 +104,15 @@ Trust policy ของ `LabRole` ยอมให้หลายสิบ service
 
 ## 4. ข้อมูลที่ยังไม่ได้ยืนยัน
 
-- **ยังไม่เคยสร้าง resource อะไรเลยในแล็บ** `terraform apply` ยังไม่เคยรัน ห้ามเคลมว่า deploy ได้แล้ว
-- ไม่รู้ว่าแล็บยอมให้ `CreateDBInstance` แบบ `MultiAZ=true` จริงหรือไม่ — API บอกว่า instance class รองรับ แต่ sสิทธิ์ของแล็บต้องลองจริงถึงจะรู้
+- งานที่ 4 พิสูจน์แล้วว่า `terraform apply` สร้างระบบได้จริง, RDS `MultiAZ=true`, EC2 สอง AZ และหน้าเว็บล็อกอินผ่าน ALB ได้; destroy แล้ว — ดู `results/task4/verification.md`
 - ไม่รู้ว่าแล็บยอมให้สร้าง ElastiCache node type ไหนบ้าง
-- `AmazonSSMManagedInstanceCore` ครอบคลุม `ssm:GetParameter` ของ path โครงงานหรือไม่ ต้องลองจริง (ถ้าไม่ได้ VocLabPolicy น่าจะครอบให้อยู่แล้ว)
+- EC2 ดึง SSM Parameter ของโครงงานได้จริงระหว่างบูตทั้งสองเครื่อง
 - **LabRole เขียน CloudWatch Logs ได้หรือไม่ — ยังไม่รู้ และเช็กล่วงหน้าไม่ได้**
   `user-data.sh:89-92` รัน container ด้วย `--log-driver awslogs` ซึ่งต้องมีสิทธิ์ `logs:CreateLogGroup` / `CreateLogStream` / `PutLogEvents`
   ของเดิมได้สิทธิ์นี้จาก `CloudWatchAgentServerPolicy` ที่แปะกับ role ของเราเอง แต่ตอนนี้ลบออกแล้วเพราะสร้าง role ไม่ได้
   policy ที่แปะกับ LabRole แบบมีชื่อ (SSMManagedInstanceCore, ECR ReadOnly, EKS ×2) **ไม่มีสิทธิ์ logs**
   เหลือความหวังที่ `VocLabPolicy1-3` แต่ **อ่านเนื้อ policy ไม่ได้** — `iam:GetPolicy` โดน explicit deny
-  → **ถ้า awslogs driver ไม่มีสิทธิ์ container จะไม่สตาร์ทเลย** (ไม่ใช่แค่ log หาย)
-  แผนสำรองถ้าเจอปัญหาตอน apply: เปลี่ยนเป็น `--log-driver json-file` แล้วดู log ด้วย `docker logs` ผ่าน SSM Session Manager
+  `user-data.sh` มี fallback ไป `json-file` ถ้า awslogs ใช้ไม่ได้; งานที่ 4 ยืนยันว่า container ขึ้นและ health ผ่าน แต่ยังไม่ได้ตรวจ log stream โดยตรง
 
 ---
 
@@ -339,7 +337,7 @@ Learner Lab บล็อกทั้งคู่ และ `list-open-id-connect
 > `ListBucket` จึงมีผลต่อ **เลข status เท่านั้น** ไม่ใช่ตัวตัดสินว่าได้ `index.html` หรือไม่
 > https://docs.aws.amazon.com/AmazonS3/latest/userguide/CustomErrorDocSupport.html
 
-**ยังไม่ได้ยืนยันกับ bucket จริง** — ตอนงานที่ 4 ยิงคำสั่งนี้ตัดสินแล้วแก้โค้ดให้ตรงผล
+**ยืนยันกับ bucket จริงในงานที่ 4 แล้ว** — deep route ได้ HTTP 404 และเนื้อหา `index.html`
 
 ```bash
 curl -i http://<web_endpoint>/route/ที่ไม่มีไฟล์จริง
@@ -370,7 +368,7 @@ curl -i http://<web_endpoint>/route/ที่ไม่มีไฟล์จร�
   `VITE_API_BASE_URL=http://verify-alb-probe...` แล้วค้นใน `dist/assets/index-*.js` พบค่านั้นฝังอยู่ 1 จุด
   ยืนยันว่า Vite แทนค่าตอน build จริง และ**เปลี่ยนที่อยู่ API ทีหลังโดยไม่ build ใหม่ไม่ได้**
   (build ใหม่แบบไม่ใส่ตัวแปรเพื่อล้างค่า probe ออกแล้ว)
-- **ยังไม่ได้รัน workflow บน GitHub** — ต้องมี credential ของแล็บก่อน ทำในงานที่ 4
+- **ยังไม่ได้รัน workflow บน GitHub** — ต้องใส่ credential ของ lab session ใหม่ใน GitHub Secrets แล้วทดสอบในงานที่ 5
 
 **ไม่ได้อยู่ในแผนเดิมแต่แก้ไปด้วย**
 
@@ -382,13 +380,15 @@ curl -i http://<web_endpoint>/route/ที่ไม่มีไฟล์จร�
   ไม่ได้อ่านจาก Terraform output ตามที่แผนเขียนไว้ เพราะ CI ไม่มี state ของ Terraform
   ค่าที่ได้เหมือนกัน แต่วิธีนี้ทนต่อการ destroy/apply ใหม่ซึ่งทำบ่อยในแล็บ (DNS ของ ALB เปลี่ยนทุกครั้ง)
 
-### งานที่ 4 — apply จริงครั้งแรก
+### ✅ งานที่ 4 — apply จริงครั้งแรก (เสร็จ 14 ต.ค.)
 
 - `terraform apply` ในแล็บ → เก็บ `alb_dns_name`, `web_endpoint`, `ecr_repository_url`
 - ตรวจว่า Multi-AZ สร้างได้จริง (ข้อที่ยังไม่ยืนยันในหัวข้อ 4)
 - `terraform destroy` ทันทีที่เก็บหลักฐานพอ
 
 **เสร็จเมื่อ** เปิดหน้าเว็บจาก S3 endpoint แล้วล็อกอินผ่าน ALB ได้จริง และมี screenshot
+
+**ผลจริง:** `terraform apply` สำเร็จ; RDS Multi-AZ ใช้งานได้; ALB มี target healthy 2 เครื่อง; เว็บ S3 แสดงข้อมูลจาก API และล็อกอินลูกค้าจนเห็น dashboard ได้ จากนั้น `terraform destroy` และลบ bucket ที่ต้องจัดการด้วย AWS CLI สำเร็จ หลักฐานและภาพอยู่ใน [`results/task4/verification.md`](results/task4/verification.md)
 
 ### งานที่ 5 — เก็บผลการทดลอง
 

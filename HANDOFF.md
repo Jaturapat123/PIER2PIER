@@ -21,14 +21,14 @@
 
 ### 0.2 ตอนนี้อยู่ตรงไหนของแผน
 
-แผนงานเต็มอยู่ใน `instruction.md` §9 มี 6 งาน — **ทำเสร็จแล้ว 3 งาน**
+แผนงานเต็มอยู่ใน `instruction.md` §9 มี 6 งาน — **ทำเสร็จแล้ว 4 งาน**
 
 | งาน | สถานะ | ตรวจด้วยอะไร |
 |---|---|---|
 | 1. Terraform: NAT 2 ตัว · route table ต่อ AZ · LabInstanceProfile · us-east-1 · Multi-AZ | ✅ | `terraform fmt -check` exit 0 · `terraform validate` Success |
 | 2. Terraform: รื้อ CloudFront → `frontend_web` (S3 website hosting) | ✅ | `terraform validate` Success · ไม่มี resource CloudFront เหลือ |
 | 3. GitHub Actions: เลิก OIDC → access key+session token · `VITE_API_BASE_URL` · ลบ step ล้าง cache | ✅ | YAML parse ผ่าน 3 ไฟล์ · build จริงแล้วเจอ URL ฝังใน `dist/assets/index-*.js` |
-| **4. `terraform apply` จริงในแล็บ** | ⬜ **งานต่อไป** | ต้องเปิดแล็บจริง — ดู §0.4 |
+| 4. `terraform apply` จริงในแล็บ | ✅ | Multi-AZ · ALB healthy 2 เครื่อง · ล็อกอินผ่าน S3/ALB · ภาพใน `results/task4/` · destroy แล้ว |
 | 5. เก็บผลทดลอง 4 ชุดบน AWS จริง | ⬜ | |
 | 6. ElastiCache ในโค้ดแอป (ตัดได้ถ้าเวลาไม่พอ) | ⬜ | |
 
@@ -42,19 +42,18 @@
 - Backend 31 เทสต์ผ่านบน GitHub Actions (job 1 ของ Deploy รอบ 6 ก.ย.)
 - Load balancing 50/50 และ failover 100% — **บน docker-compose ไม่ใช่บน AWS**
 
-ยังไม่ได้พิสูจน์เลย
-- **`terraform apply` ยังไม่เคยรันกับ AWS จริงแม้ครั้งเดียว** — ยังไม่มี resource ใดในบัญชี
-- ไม่รู้ว่า `LabInstanceProfile` มีอยู่จริงในบัญชีไหม (`validate` ไม่เช็ก data source)
+ผลจาก AWS จริงและข้อที่ยังไม่ได้พิสูจน์
+- `terraform apply` สำเร็จจริงใน AWS Academy วันที่ 14 ต.ค. และ destroy แล้ว — ดู `results/task4/verification.md`
+- `LabInstanceProfile` มีอยู่จริง; EC2 สองเครื่องรันในคนละ AZ และ ALB รายงาน healthy ทั้งคู่ก่อน destroy
 - **ไม่รู้ว่า LabRole มีสิทธิ์ `logs:CreateLogStream` และ `logs:PutLogEvents` ไหม**
   ถ้าไม่มี log จะไม่เข้า CloudWatch แต่**ระบบยังขึ้นได้** — `user-data.sh` ถอยไปใช้
   `--log-driver json-file` ให้เองแล้วพิมพ์คำเตือนใน `/var/log/user-data.log`
   ถ้าเจอคำเตือนนั้นให้เขียนเป็นข้อจำกัดในรายงานว่า log ไม่ได้รวมศูนย์
-- **ไม่รู้ว่า deep link บน S3 website endpoint ได้ 404 หรือ 403** — ทั้งสองทางหน้าเว็บทำงานได้
-  ถ้าได้ 403 ให้ถอด `s3:ListBucket` ออกจาก bucket policy · คำสั่งตัดสินอยู่ใน `instruction.md` §9 งานที่ 2
-- ไม่รู้ว่าแล็บยอมให้สร้าง RDS Multi-AZ ไหม
+- deep link บน S3 website endpoint ได้ HTTP 404 พร้อม `index.html` ตามที่ทดสอบจริง
+- RDS Multi-AZ สร้างสำเร็จ โดย primary อยู่ `us-east-1b` และ standby อยู่ `us-east-1a`
 - ยังไม่ได้รัน workflow deploy/rollback บน GitHub เลยหลังแก้งานที่ 3
 
-### 0.4 สิ่งที่คนต้องทำเอง Claude ทำแทนไม่ได้
+### 0.4 ขั้นตอนเมื่อเริ่มแล็บรอบใหม่
 
 | ลำดับ | ต้องทำ | หมายเหตุ |
 |---|---|---|
@@ -63,12 +62,12 @@
 | 3 | เปิด **AWS Details** → คัดลอก 3 ค่าไปใส่ GitHub Secrets | `AWS_ACCESS_KEY_ID` · `AWS_SECRET_ACCESS_KEY` · `AWS_SESSION_TOKEN` — **หมดอายุทุกครั้งที่ปิดแล็บ ต้องใส่ใหม่ทุก session** |
 | 4 | สร้าง `infra/terraform/terraform.tfvars` จาก `.example` | ใส่ `db_password` และ `jwt_secret` (`openssl rand -base64 48`) · ไฟล์นี้อยู่ใน `.gitignore` **ห้าม commit** |
 | 5 | กด `terraform apply` เอง | สร้างของจริงและเสียเงินจริง ~$0.21/ชม. ถ้าเปิดทุกอย่าง |
-| 6 | `terraform destroy` ทันทีที่เก็บหลักฐานพอ | **งบหมด = บัญชีถูกปิดและลบของทั้งหมด** มี $100 ใช้ไปแล้ว $0.23 |
+| 6 | `terraform destroy` ทันทีที่เก็บหลักฐานพอ | บัญชีนี้มีงบ $50; ตรวจยอดล่าสุดบนหน้าแล็บทุกครั้ง |
 | 7 | export PNG จาก `.drawio` 11 ไฟล์ | เจ้าของงานชอบ export เอง — อย่าส่ง PNG ให้ถ้าไม่สั่ง |
 | 8 | แก้ `.docx` ใน Word แล้ว `Ctrl+A → F9` | รีเฟรชสารบัญ 3 ชุด · **Claude ยังไม่ได้รับอนุญาตให้แตะไฟล์ `.docx`** |
 
 > ⚠️ **บัญชี Learner Lab เป็นของใครของมัน** — ข้อเท็จจริงเรื่องบัญชีใน `instruction.md` §2
-> (ใช้งบไป $0.23 จาก $100 · ยังไม่มี resource ใด ๆ · Block Public Access ปิดทั้ง 4 ข้อ)
+> (บัญชีที่ใช้ทำงานที่ 4 แสดงวงเงิน $50 · destroy ทรัพยากรแล้ว · Block Public Access ปิดทั้ง 4 ข้อ)
 > เป็นของบัญชีผู้ส่งมอบ **ไม่ใช่ของคุณ** ถ้าคุณใช้แล็บของตัวเอง ต้องตรวจซ้ำเองด้วยคำสั่งที่
 > `instruction.md` §2 แนบไว้ให้ทุกข้อ — อย่าเชื่อตัวเลขงบและสถานะ resource ตรง ๆ
 
@@ -142,8 +141,7 @@
 
 ## 4. ❌ สิ่งที่ยังไม่ได้ทำ / ยังไม่ได้พิสูจน์
 
-1. **`terraform apply` ยังไม่เคยรันกับ AWS จริง** — ตรวจแค่ `fmt` + `validate` เท่านั้น อย่าเคลมว่า deploy ได้แล้ว
-   ตอนนี้มีบัญชี **AWS Academy Learner Lab** แล้ว แต่ยังไม่ได้สร้าง resource อะไรเลย (ใช้งบไป $0.23 จาก $100)
+1. ✅ **งานที่ 4 ใน `instruction.md` §9 เสร็จแล้ว** — apply บน AWS จริง, ล็อกอินหน้าเว็บผ่าน ALB, ยืนยัน RDS Multi-AZ แล้ว destroy ครบ ดู `results/task4/verification.md`
 2. ✅ **งานที่ 1–3 ใน `instruction.md` §9 ทำเสร็จแล้ว** (14 ต.ค.) — Terraform และ workflow พร้อมแล้ว
    **GitHub OIDC ใช้ไม่ได้ใน Learner Lab** (สร้าง IAM role ไม่ได้) workflow เปลี่ยนไปใช้
    access key + secret + **session token** จากหน้า `AWS Details` แล้ว ซึ่งหมดอายุทุกครั้งที่ session จบ

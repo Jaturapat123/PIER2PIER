@@ -98,6 +98,12 @@ variable "db_password" {
   sensitive   = true
 }
 
+variable "manage_frontend_bucket" {
+  description = "ปิดเฉพาะแล็บที่ SCP ห้าม Terraform อ่าน S3 Object Lock; ต้องสร้างและลบ bucket ด้วย AWS CLI"
+  type        = bool
+  default     = true
+}
+
 variable "jwt_secret" {
   description = "สร้างด้วย: openssl rand -base64 48"
   type        = string

@@ -95,14 +95,24 @@ npm run lint         # ตรวจ TypeScript
 
 ### ครั้งแรก
 
+ทำตาม [คู่มือ AWS Academy แบบทีละขั้น](docs/AWS_ACADEMY_STEPS.md) สำหรับคำสั่ง PowerShell ตั้งแต่เริ่มแล็บจนถึง destroy
+
+สำหรับ AWS Academy Learner Lab ที่ทดสอบจริง ดู [ผล apply และข้อจำกัดของแล็บ](results/task4/verification.md):
+ต้องสร้าง S3 bucket ด้วย AWS CLI แล้วตั้ง `manage_frontend_bucket = false` เพราะ SCP ปฏิเสธการอ่าน Object Lock ของ Terraform;
+ใช้ `db_password` ไม่เกิน 41 ตัวอักษร และกำหนด `image_tag` เป็นแท็กที่จะ push ไป ECR
+
 ```bash
 cd infra/terraform
 cp terraform.tfvars.example terraform.tfvars   # ใส่ db_password และ jwt_secret
 
 terraform init
+terraform apply -target=module.ecr  # สร้าง repository ก่อน push image
+# สร้าง S3 bucket และ push API image ไป ECR ด้วยแท็กที่กำหนดใน terraform.tfvars
 terraform plan       # ตรวจดูว่าจะสร้างอะไรบ้างก่อนกด apply
 terraform apply
 ```
+
+หลัง destroy ต้องลบทุก version ของไฟล์ใน S3 แล้วลบ bucket ด้วย AWS CLI ด้วย
 
 Terraform จะแสดง `alb_dns_name`, `web_endpoint` และ `ecr_repository_url`
 
@@ -112,13 +122,15 @@ Terraform จะแสดง `alb_dns_name`, `web_endpoint` และ `ecr_repos
 
 ### ตั้งค่า GitHub
 
-สร้าง IAM role ที่เชื่อถือ GitHub OIDC provider แล้วเพิ่ม secret:
+Learner Lab สร้าง IAM role สำหรับ GitHub OIDC ไม่ได้ ให้ใช้ access key, secret key และ session token จาก AWS Details เป็น GitHub Secrets (ต้องอัปเดตทุก session):
 
 | Secret | ค่า |
 |---|---|
-| `AWS_DEPLOY_ROLE_ARN` | ARN ของ IAM role ที่ให้ GitHub Actions สวมสิทธิ์ |
+| `AWS_ACCESS_KEY_ID` | Access key ชั่วคราวจาก AWS Details |
+| `AWS_SECRET_ACCESS_KEY` | Secret key ชั่วคราวจาก AWS Details |
+| `AWS_SESSION_TOKEN` | Session token ชั่วคราวจาก AWS Details |
 
-**ไม่ต้องเก็บ AWS Access Key** — ใช้ OIDC ที่ให้ credential ชั่วคราวแทน
+อย่า commit ค่าเหล่านี้ลง repository และต้องอัปเดตเมื่อเริ่ม lab session ใหม่
 
 ### หลังจากนั้น
 
@@ -166,5 +178,6 @@ terraform apply
 | ไฟล์ | เนื้อหา |
 |---|---|
 | [`docs/AWS_Services_Report.md`](docs/AWS_Services_Report.md) | รายงานหลัก — บริการ AWS ทุกตัวพร้อมเหตุผล ฟีเจอร์ระบบ ผลการทดลอง ค่าใช้จ่าย |
+| [`docs/AWS_ACADEMY_STEPS.md`](docs/AWS_ACADEMY_STEPS.md) | ขั้นตอน deploy และ destroy ใน AWS Academy Learner Lab |
 | [`docs/specs/2026-09-06-port-wms-design.md`](docs/specs/2026-09-06-port-wms-design.md) | เอกสารออกแบบระบบ |
 | [`docs/specs/2026-09-06-port-wms-plan.md`](docs/specs/2026-09-06-port-wms-plan.md) | แผนการพัฒนาแบ่งเป็น 14 งานย่อย |

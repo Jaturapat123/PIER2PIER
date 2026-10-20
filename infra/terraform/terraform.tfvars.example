@@ -9,7 +9,14 @@ aws_region  = "us-east-1"
 # ค่า RDS คูณสอง — ถ้าต้องการประหยัดช่วงพัฒนาให้ตั้ง false ชั่วคราว
 db_multi_az = true
 
-db_password = "เปลี่ยนเป็นรหัสผ่านที่คาดเดายาก"
+db_password = "เปลี่ยนเป็นรหัสผ่านที่คาดเดายากไม่เกิน41ตัวอักษร"
 jwt_secret  = "สร้างด้วย openssl rand -base64 48"
+
+# ต้อง push API image ไป ECR ด้วยแท็กนี้ก่อน apply ส่วน EC2
+image_tag = "latest"
+
+# Learner Lab ที่ SCP ปฏิเสธ s3:GetBucketObjectLockConfiguration:
+# สร้าง bucket pier2pier-dev-web ด้วย AWS CLI ก่อน apply และลบเองหลัง destroy
+# manage_frontend_bucket = false
 
 alarm_email = "your-email@example.com"
