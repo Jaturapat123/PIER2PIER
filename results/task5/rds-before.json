@@ -1,0 +1,7 @@
+{
+    "id": "pier2pier-dev-mysql",
+    "status": "available",
+    "multiAz": true,
+    "primaryAz": "us-east-1b",
+    "standbyAz": "us-east-1a"
+}

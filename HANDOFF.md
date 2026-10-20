@@ -1,6 +1,6 @@
 # HANDOFF — สถานะโครงงาน jekcloud (Port WMS)
 
-> อัปเดต: 14 ต.ค. 2569 · อ่านไฟล์นี้ก่อนทำงานต่อ
+> อัปเดต: 20 ต.ค. 2569 · อ่านไฟล์นี้ก่อนทำงานต่อ
 >
 > ⚠️ **สถาปัตยกรรมเปลี่ยนแล้ว** — ย้ายไป deploy บน AWS Academy Learner Lab · ไม่มี CloudFront · RDS เป็น Multi-AZ
 > รายละเอียดทั้งหมดและแผนงานอยู่ใน [`instruction.md`](instruction.md) ถ้าขัดกับไฟล์นี้ให้ยึดไฟล์นั้น
@@ -21,7 +21,7 @@
 
 ### 0.2 ตอนนี้อยู่ตรงไหนของแผน
 
-แผนงานเต็มอยู่ใน `instruction.md` §9 มี 6 งาน — **ทำเสร็จแล้ว 4 งาน**
+แผนงานเต็มอยู่ใน `instruction.md` §9 มี 6 งาน — **ทำเสร็จแล้ว 5 งาน**
 
 | งาน | สถานะ | ตรวจด้วยอะไร |
 |---|---|---|
@@ -29,7 +29,7 @@
 | 2. Terraform: รื้อ CloudFront → `frontend_web` (S3 website hosting) | ✅ | `terraform validate` Success · ไม่มี resource CloudFront เหลือ |
 | 3. GitHub Actions: เลิก OIDC → access key+session token · `VITE_API_BASE_URL` · ลบ step ล้าง cache | ✅ | YAML parse ผ่าน 3 ไฟล์ · build จริงแล้วเจอ URL ฝังใน `dist/assets/index-*.js` |
 | 4. `terraform apply` จริงในแล็บ | ✅ | Multi-AZ · ALB healthy 2 เครื่อง · ล็อกอินผ่าน S3/ALB · ภาพใน `results/task4/` · destroy แล้ว |
-| 5. เก็บผลทดลอง 4 ชุดบน AWS จริง | ⬜ | |
+| 5. เก็บผลทดลอง 4 ชุดบน AWS จริง | ✅ | ผลจริงและภาพ Chrome ที่เห็น URL/แท็บใน `results/task5/verification.md`; destroy แล้ว |
 | 6. ElastiCache ในโค้ดแอป (ตัดได้ถ้าเวลาไม่พอ) | ⬜ | |
 
 ### 0.3 ⚠️ เส้นแบ่งระหว่าง "ตรวจแล้ว" กับ "ยังไม่ได้พิสูจน์"
@@ -40,7 +40,7 @@
 - Terraform ผ่าน `fmt -check` และ `validate` (Terraform v1.16.5 บนเครื่องผู้ส่งมอบ)
 - `VITE_API_BASE_URL` ถูกฝังลงไฟล์ JS ตอน build จริง
 - Backend 31 เทสต์ผ่านบน GitHub Actions (job 1 ของ Deploy รอบ 6 ก.ย.)
-- Load balancing 50/50 และ failover 100% — **บน docker-compose ไม่ใช่บน AWS**
+- Load balancing 50/50 และ failover 100% เคยวัดบน docker-compose; ผล AWS จริงอยู่ด้านล่างและต่างจากผลจำลอง
 
 ผลจาก AWS จริงและข้อที่ยังไม่ได้พิสูจน์
 - `terraform apply` สำเร็จจริงใน AWS Academy วันที่ 14 ต.ค. และ destroy แล้ว — ดู `results/task4/verification.md`
@@ -50,8 +50,11 @@
   `--log-driver json-file` ให้เองแล้วพิมพ์คำเตือนใน `/var/log/user-data.log`
   ถ้าเจอคำเตือนนั้นให้เขียนเป็นข้อจำกัดในรายงานว่า log ไม่ได้รวมศูนย์
 - deep link บน S3 website endpoint ได้ HTTP 404 พร้อม `index.html` ตามที่ทดสอบจริง
-- RDS Multi-AZ สร้างสำเร็จ โดย primary อยู่ `us-east-1b` และ standby อยู่ `us-east-1a`
-- ยังไม่ได้รัน workflow deploy/rollback บน GitHub เลยหลังแก้งานที่ 3
+- รอบงานที่ 5 วันที่ 20 ต.ค.: ALB กระจาย 200 คำขอ 100/100 ระหว่าง EC2 สอง AZ, ไม่มี HTTP error
+- หยุด EC2 จริงระหว่าง probe: ล้มเหลว 10/113 คำขอ (91.15% พร้อมใช้งาน), พบ HTTP 504; หลังเปิดเครื่องกลับ ALB healthy ทั้งสองเครื่อง จึง **ห้ามอ้างว่า EC2 failover ไม่มี downtime**
+- RDS `Reboot with failover` เปลี่ยน primary จาก `us-east-1b` เป็น `us-east-1a`: health ล้มเหลว 3/149 คำขอ ช่วงสะดุดที่สังเกตได้ 14 วินาที
+- GitHub Actions [Deploy #39399832137](https://github.com/Jaturapat123/PIER2PIER/actions/runs/39399832137) ผ่าน 4 jobs และ [Rollback #39400465065](https://github.com/Jaturapat123/PIER2PIER/actions/runs/39400465065) ผ่าน; ยืนยัน `/health` จากทั้งสอง EC2 เป็น `818feb0` แล้วกลับเป็น `05e193b`
+- หลังทดสอบ `terraform destroy` สำเร็จ 55 resources, ลบ S3 bucket แยก, ตรวจ Terraform state ว่างและไม่มี RDS/ALB/ECR/S3/EIP; EC2 terminated, NAT deleted ดู [`results/task5/verification.md`](results/task5/verification.md)
 
 ### 0.4 ขั้นตอนเมื่อเริ่มแล็บรอบใหม่
 

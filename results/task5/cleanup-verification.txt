@@ -1,0 +1,8 @@
+Terraform managed state entries: 0
+RDS: []
+ALB: []
+ECR: []
+S3: []
+EC2: [     {         "id": "i-0caa4bec47f47f170",         "state": "terminated"     },     {         "id": "i-071fc62804df7bd1f",         "state": "terminated"     } ]
+NAT: [     {         "id": "nat-09be53a2fd0f23027",         "state": "deleted"     },     {         "id": "nat-07601c7f77c511cdf",         "state": "deleted"     } ]
+EIP: []

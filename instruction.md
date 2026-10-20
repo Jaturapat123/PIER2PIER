@@ -399,6 +399,8 @@ curl -i http://<web_endpoint>/route/ที่ไม่มีไฟล์จร�
 
 **เสร็จเมื่อ** มีไฟล์ผลใน `results/` และ screenshot ครบทั้ง 4 รายการ
 
+**ผลจริง 20 ต.ค. 2569:** ทำครบทั้ง 4 รายการ ดูตัวเลข, raw data, GitHub run และภาพ Chrome ที่เห็นแท็บกับ URL ใน [`results/task5/verification.md`](results/task5/verification.md) ผลที่ต้องพูดตรง ๆ คือ EC2 failover มีคำขอล้มเหลว 10/113 ครั้ง (มี HTTP 504), RDS failover มี health ล้มเหลว 3/149 ครั้งและ primary เปลี่ยน AZ จริง; Deploy และ Rollback ผ่านแล้ว หลังทดสอบทำลาย AWS resources ครบและตรวจซ้ำว่าไม่เหลือ ค่า Secrets ของ AWS Academy ต้องเปลี่ยนใหม่เมื่อเริ่มแล็บรอบถัดไป
+
 ### งานที่ 6 — ElastiCache ในโค้ดแอป (ทำท้ายสุด)
 
 - เพิ่ม cache-aside ที่ `GET /services`, `GET /schedules`, `report.service.js`

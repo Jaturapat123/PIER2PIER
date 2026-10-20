@@ -1,0 +1,11 @@
+ผลการทดสอบ RDS Multi-AZ failover
+เวลาเริ่ม (UTC): 2026-10-20T09:14:09.2706670Z
+ปลายทาง: http://pier2pier-dev-alb-70937900.us-east-1.elb.amazonaws.com/health
+RDS: pier2pier-dev-mysql
+Primary AZ ก่อน: us-east-1b
+Primary AZ หลัง: us-east-1a
+จำนวนคำขอทั้งหมด: 149
+คำขอที่ล้มเหลว: 3
+ช่วงสะดุดที่สังเกตได้ (วินาที): 14
+สถานะ: ผ่าน — primary เปลี่ยน AZ และ health ฟื้นต่อเนื่อง
+ไฟล์ข้อมูลดิบ: C:\Users\Khaul\OneDrive\เดสก์ท็อป\PIER2PIER\scripts\..\results\task5\rds-failover-25691020-161356.csv

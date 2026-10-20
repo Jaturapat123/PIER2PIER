@@ -1,0 +1,5 @@
+deploy: 20 requests via ALB
+endpoint: http://pier2pier-dev-alb-70937900.us-east-1.elb.amazonaws.com/health
+
+11 requests: i-071fc62804df7bd1f, us-east-1a, 818feb0, True
+9 requests: i-0caa4bec47f47f170, us-east-1b, 818feb0, True
