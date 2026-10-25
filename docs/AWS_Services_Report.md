@@ -61,34 +61,38 @@ Management System)** ที่ให้ตัวแทนขนส่งจอ�
 ## 3. สถาปัตยกรรมโดยรวม
 
 ```
-ผู้ใช้ (เบราว์เซอร์)  ── คุยกับโดเมนเดียวผ่าน HTTPS ตลอด
+ผู้ใช้ (เบราว์เซอร์)  ── คุยกับสองที่อยู่ คนละ origin ทั้งคู่เป็น HTTP
    │
-   ▼
-CloudFront (ทางเข้าเดียวของทั้งระบบ)
-   │
-   ├── /  และไฟล์เว็บ ──────► S3 (ไฟล์ React, bucket แบบ private)
-   │                            เข้าถึงผ่าน Origin Access Control เท่านั้น
+   ├── /  และไฟล์เว็บ ──────► S3 static website endpoint
+   │                            (ไฟล์ React · bucket แบบ public read)
+   │                            index + error document = index.html → SPA routing
    │
    └── /api/*  และ /health ──► Application Load Balancer ── Public Subnet ทั้ง 2 AZ
              │                    ตรวจสุขภาพที่ GET /health ทุก 15 วินาที
              │
-             ├──► EC2 เครื่อง A  (Private Subnet · ap-southeast-1a) ─┐  Docker: Node.js + Express
-             └──► EC2 เครื่อง B  (Private Subnet · ap-southeast-1b) ─┤
-                                                                     │
-                                          Amazon RDS MySQL ◄─────────┘
-                                          (Private Subnet · ไม่มีเส้นทางออกอินเทอร์เน็ต)
+             ├──► EC2 เครื่อง A  (Private Subnet · us-east-1a) ─┐  Docker: Node.js + Express
+             └──► EC2 เครื่อง B  (Private Subnet · us-east-1b) ─┤
+                                                                 │
+                                      Amazon RDS MySQL ◄─────────┘
+                                      primary (us-east-1a) + standby (us-east-1b) · Multi-AZ
+                                      (Private Subnet · ไม่มีเส้นทางออกอินเทอร์เน็ต)
 
 CI/CD:  git push → GitHub Actions → ทดสอบ → docker build → ECR
                                   → SSM Send-Command → deploy ทีละเครื่อง
+                                  → s3 sync ไฟล์เว็บขึ้น S3
 
-CloudWatch:  รับ Log และ Metric จากทุกชั้น (ALB · EC2 · RDS) + Alarm แจ้งเตือน
+CloudWatch:  รับ Log และ Metric จากทุกชั้น (ALB · EC2 · RDS) + Alarm แจ้งเตือนผ่าน SNS
 ```
+
+> **ไม่มี CloudFront ในสถาปัตยกรรมนี้** — AWS Academy Learner Lab ปฏิเสธ `cloudfront:*` ที่ระดับ policy
+> หน้าเว็บจึงเสิร์ฟจาก S3 website endpoint ตรง ๆ ซึ่ง **ไม่รองรับ HTTPS** ทำให้ทั้งระบบเป็น HTTP
+> และทำให้หน้าเว็บกับ API อยู่คนละ origin จึงต้องตั้ง CORS (ดูหัวข้อ 4.5 และ 11)
 
 ### การแบ่งชั้นเครือข่าย
 
 | ชั้น | Subnet | สิ่งที่อยู่ในนั้น | ออกอินเทอร์เน็ตได้ไหม |
 |---|---|---|---|
-| Presentation | — | S3 + CloudFront (บริการนอก VPC) | ผู้ใช้เข้าถึงได้ผ่าน CloudFront เท่านั้น |
+| Presentation | — | S3 static website (บริการนอก VPC) | ผู้ใช้เข้าถึงได้โดยตรงผ่าน website endpoint |
 | Load Balancing | Public × 2 AZ | ALB | รับ inbound จากอินเทอร์เน็ต |
 | Application | Private-app × 2 AZ | EC2 ที่รัน API | ออกได้ผ่าน NAT (ดึง image, ส่ง log) แต่เข้าจากภายนอกไม่ได้ |
 | Database | Private-db × 2 AZ | RDS MySQL | **ไม่มีเส้นทางออกอินเทอร์เน็ตเลย** |
@@ -167,53 +171,54 @@ CloudWatch:  รับ Log และ Metric จากทุกชั้น (ALB 
 - `multi_az` — เป็นตัวแปร ปิดช่วงพัฒนาเพราะคิดเงินเป็นสองเท่า เปิดตอนสาธิต Stage 3 เพื่อแสดง failover
 - `slow_query_log` เปิด และตั้ง `long_query_time = 1` — บันทึก query ที่ช้ากว่า 1 วินาที ใช้หาคอขวดตอนทดสอบโหลด
 
-### 4.5 Amazon S3 + Amazon CloudFront — ส่วนหน้าเว็บ
+### 4.5 Amazon S3 — ส่วนหน้าเว็บ (static website hosting)
 
 | หัวข้อ | รายละเอียด |
 |---|---|
-| **ใช้ทำอะไร** | S3 เก็บไฟล์ที่ build จาก React (HTML, JS, CSS) · CloudFront กระจายไฟล์ผ่าน edge location พร้อม HTTPS |
+| **ใช้ทำอะไร** | เก็บไฟล์ที่ build จาก React (HTML, JS, CSS) และเสิร์ฟตรงผ่าน **S3 static website endpoint** |
 | **ทำไมไม่วางบน EC2** | ไฟล์เว็บเป็น static ไม่ต้องประมวลผล การวางบน S3 ทำให้ไม่กินทรัพยากรของเซิร์ฟเวอร์ที่ต้องรับงาน API และ S3 มีความทนทาน 99.999999999% (11 nines) |
-| **ทำไมต้องมี CloudFront** | (1) ให้ HTTPS ฟรีโดยไม่ต้องซื้อใบรับรองและไม่ต้องมีโดเมนของตัวเอง (2) แคชไฟล์ไว้ที่ edge ใกล้ผู้ใช้ ลดเวลาโหลด (3) ทำให้ปิด S3 เป็น private ได้สนิท (4) **เป็นทางเข้าเดียวของทั้งเว็บและ API** ทำให้ทุกอย่างอยู่โดเมนเดียวกัน จึงไม่มีปัญหา mixed content และไม่ต้องตั้ง CORS |
+| **การตั้งค่าสำคัญ** | `index_document = index.html` · **`error_document = index.html`** (ทำ SPA routing) · bucket policy แบบ public read · `ownership_controls = BucketOwnerEnforced` ปิด ACL ทั้งหมด |
+| **ค่าใช้จ่าย** | เก็บไฟล์ไม่กี่ MB และปริมาณคำขอต่ำ จึงอยู่ในระดับไม่ถึง $1/เดือน |
 
-**Origin Access Control (OAC)** — S3 bucket ปิดสาธารณะทั้งหมด (`block_public_acls`,
-`restrict_public_buckets` เปิดทุกตัว) CloudFront เข้าถึงผ่าน OAC ซึ่งเป็นวิธีที่ AWS แนะนำ
-แทน Origin Access Identity (OAI) แบบเดิม เพราะใช้ credential ระยะสั้นที่หมุนเวียนบ่อย
-และรองรับ resource-based policy ที่ละเอียดกว่า [5]
+**ทำไมไม่ใช้ CloudFront — และสิ่งที่เสียไป**
 
-**CloudFront เป็นทางเข้าเดียวของทั้งเว็บและ API**
+การออกแบบรอบแรกใช้ S3 แบบ private ทั้งก้อน + CloudFront + Origin Access Control (OAC) โดยให้
+CloudFront เป็นทางเข้าเดียวของทั้งเว็บและ API ซึ่งให้ HTTPS ฟรี แคชที่ edge และทำให้ทุกอย่าง
+อยู่โดเมนเดียวกัน **แต่ AWS Academy Learner Lab ปฏิเสธ `cloudfront:*` ที่ระดับ policy ของ role
+`voclabs`** ยืนยันจากบัญชีจริง จึงใช้ไม่ได้และต้องเปลี่ยนไปใช้ S3 static website hosting ตรง ๆ
 
-การออกแบบให้ CloudFront มี origin สองตัว (S3 สำหรับไฟล์เว็บ และ ALB สำหรับ `/api/*`
-กับ `/health`) แก้ปัญหาสองข้อพร้อมกัน:
+สิ่งที่เสียไปและต้องระบุเป็นข้อจำกัดของระบบ (ดูหัวข้อ 11)
 
-1. **ป้องกัน mixed content** — ถ้าให้เบราว์เซอร์เรียก ALB ตรง ๆ หน้าเว็บที่เสิร์ฟผ่าน HTTPS
-   จะเรียกปลายทางที่เป็น HTTP ซึ่งเบราว์เซอร์บล็อกทุกคำขอตามนโยบายความปลอดภัย
-   **ระบบจะใช้งานไม่ได้เลย** และการแก้ด้วยการซื้อใบรับรองให้ ALB ต้องมีโดเมนเป็นของตัวเอง
-2. **ไม่ต้องตั้ง CORS** — เมื่ออยู่โดเมนเดียวกันก็เป็น same-origin ไม่มีคำขอข้ามโดเมน
-
-`ordered_cache_behavior` ของ `/api/*` ตั้ง cache policy เป็น **CachingDisabled** เพราะข้อมูล
-พื้นที่คงเหลือของเที่ยวเรือต้องสดเสมอ และตั้ง origin request policy เป็น
-**AllViewerExceptHostHeader** เพื่อส่ง header `Authorization` ต่อไปให้ ALB
-ถ้าไม่ส่งต่อ JWT จะหายกลางทางและทุกคำขอจะได้ 401
+1. **ไม่มี HTTPS เลยทั้งระบบ** — S3 website endpoint ไม่รองรับ HTTPS และเอกสาร AWS แนะนำให้ใช้
+   CloudFront ถ้าต้องการ ซึ่งแล็บใช้ไม่ได้ · จดโดเมนและออกใบรับรองก็ทำไม่ได้ในแล็บ
+   ไม่เกิดปัญหา mixed content เพราะหน้าเว็บและ API เป็น HTTP ทั้งคู่ แต่ข้อมูลไม่ถูกเข้ารหัสระหว่างทาง
+2. **ต้องตั้ง CORS** — หน้าเว็บอยู่ที่ S3 website endpoint แต่ API อยู่ที่ ALB จึงเป็นคนละ origin
+   ทุกคำขอจาก frontend เป็น cross-origin จริง backend ต้องตั้ง `CORS_ORIGINS` เป็น endpoint ของ S3
+   (ตอนมี CloudFront เป็นทางเข้าเดียวจึงเป็น same-origin และไม่ต้องตั้ง CORS เลย)
+3. **หน้าเว็บต้องรู้ที่อยู่ API ตั้งแต่ตอน build** — `deploy.yml` ส่ง `VITE_API_BASE_URL=http://<alb-dns>`
+   ตอน `npm run build` เพราะ Vite แทนค่า `import.meta.env` ลงไปในไฟล์ JS ตอน build ไม่ใช่ตอน runtime
+   **เปลี่ยนที่อยู่ API ทีหลังโดยไม่ build ใหม่จึงทำไม่ได้**
+4. **bucket เป็น public read** — ปิด Block Public Access ของ bucket และเปิด `s3:GetObject` สาธารณะ
+   ต่างจากของเดิมที่ปิดสนิทและให้ CloudFront เข้าผ่าน OAC เท่านั้น
 
 **ปัญหาเส้นทางของ SPA และวิธีแก้ที่เลือกใช้**
 
 React Router จัดการเส้นทางที่ฝั่งเบราว์เซอร์ แต่ S3 ไม่รู้จัก path อย่าง `/app/bookings`
 เพราะไม่มีไฟล์ชื่อนั้นอยู่จริง เมื่อผู้ใช้กด refresh หรือเปิดลิงก์ตรงจะได้ 404
 
-วิธีที่พบบ่อยในบทความทั่วไปคือตั้ง `custom_error_response` ให้ CloudFront เจอ 403/404
-แล้วส่ง `index.html` กลับพร้อมสถานะ 200 [6] **แต่วิธีนี้ใช้กับสถาปัตยกรรมนี้ไม่ได้**
-เพราะ `custom_error_response` มีผลกับทั้ง distribution ไม่แยกตาม behavior เมื่อ API
-อยู่ใต้โดเมนเดียวกัน คำขออย่าง `GET /api/bookings/999` ที่ควรได้ 404 จะถูกแทนที่ด้วย
-`index.html` และสถานะ 200 ทำให้การจัดการข้อผิดพลาดทั้งระบบพัง
+วิธีแก้ที่ใช้คือตั้ง **`error_document = index.html`** ของ S3 website hosting ซึ่งส่ง `index.html`
+กลับมาเมื่อหาไฟล์ไม่เจอ React Router จึงรับเส้นทางไปจัดการต่อได้ (ของเดิมใช้ CloudFront Function
+เขียน URI ที่ viewer-request ซึ่งทำไม่ได้แล้ว)
 
-ระบบนี้จึงแก้ที่ต้นทางด้วย **CloudFront Function** ที่ทำงานตอน viewer-request
-และผูกไว้กับ behavior ของไฟล์เว็บเท่านั้น ฟังก์ชันตรวจว่า URI มีนามสกุลไฟล์หรือไม่
-ถ้าไม่มีแสดงว่าเป็นเส้นทางของ React Router ให้เขียน URI เป็น `/index.html` ก่อนส่งไป S3
-คำขอที่ไปยัง `/api/*` ไม่ผ่านฟังก์ชันนี้ จึงยังคืนสถานะจริงจาก API ได้ถูกต้อง
+**ผลข้างเคียงที่ต้องเขียนตามจริง:** S3 เปลี่ยน status code ไม่ได้ ต่างจาก CloudFront Function
+deep link จึงได้ **HTTP 404 พร้อมเนื้อหา `index.html`** ไม่ใช่ 200 หน้าเว็บทำงานได้ปกติแต่
+status code ไม่ถูกต้องตามความหมาย — ยืนยันกับ bucket จริงในการ deploy เมื่อ 14 ต.ค. แล้ว
 
-> **จุดที่ต้องระวังเพิ่ม:** bucket policy ต้องให้สิทธิ์ `s3:ListBucket` ด้วย ไม่ใช่แค่
-> `s3:GetObject` เพราะถ้าไม่มี S3 จะตอบ 403 แทน 404 เมื่อไม่พบไฟล์ ทำให้แยกไม่ออกระหว่าง
-> "ไม่มีสิทธิ์" กับ "ไม่มีไฟล์" [6]
+> **จุดที่ต้องระวังเพิ่ม:** bucket policy ให้สิทธิ์ `s3:ListBucket` แบบ public ด้วย ไม่ใช่แค่
+> `s3:GetObject` เพราะถ้าไม่มี S3 จะตอบ **403** แทน 404 เมื่อไม่พบไฟล์ (เพื่อไม่เปิดเผยว่าไฟล์นั้น
+> มีอยู่จริงหรือไม่) · `ListBucket` จึงมีผลต่อ **เลข status เท่านั้น** ไม่ใช่ตัวตัดสินว่าได้
+> `index.html` หรือไม่ เพราะ custom error document ถูกส่งกลับสำหรับ 4XX ทั้งคลาสซึ่งรวม 403 [5]
+> **ข้อแลกเปลี่ยน:** ใคร ๆ ก็เรียกดูรายชื่อไฟล์ใน bucket ได้ ห้ามวางไฟล์ที่ไม่ควรเปิดเผยใน bucket นี้
 
 **นโยบายแคชที่ตั้งไว้ตอน deploy**
 
@@ -588,6 +593,19 @@ Workflow deploy ไล่ทีละเครื่อง และ**รอจ�
 
 ## 9. ผลการทดลอง
 
+> ⚠️ **ตัวเลขในหัวข้อ 9.1 และ 9.2 ยังเป็นผลจาก docker-compose บนเครื่องและ region `ap-southeast-1` ซึ่งล้าสมัย — ห้ามใช้ในรายงานรูปเล่ม**
+> ผลจาก **AWS จริง** (20 ต.ค. 2569, `us-east-1`) ต่างออกไปและเป็นชุดที่ต้องใช้:
+>
+> | การทดลอง | ผลจริงบน AWS |
+> |---|---|
+> | Load balancing | ALB กระจาย **200 คำขอ = 100/100** ระหว่าง EC2 สอง AZ · ไม่มี HTTP error |
+> | EC2 failover (หยุดเครื่องจริง) | ล้มเหลว **10/113 คำขอ → พร้อมใช้งาน 91.15%** · พบ **HTTP 504** |
+> | RDS failover (`Reboot with failover`) | primary ย้าย `us-east-1b` → `us-east-1a` · ล้มเหลว **3/149 คำขอ** · สะดุด **14 วินาที** |
+> | CI/CD | Deploy run `39399832137` ผ่าน 4 jobs · Rollback run `39400465065` ผ่าน |
+>
+> **ห้ามอ้างว่า EC2 failover ไม่มี downtime** — มี 504 จริง 10 ครั้ง
+> หลักฐาน ตัวเลขดิบ และภาพ 23 รูปอยู่ใน [`../results/task5/verification.md`](../results/task5/verification.md)
+
 ผลทั้งหมดในหัวข้อนี้ได้จากการรันระบบจริง เก็บไว้ที่โฟลเดอร์ `results/`
 
 ### 9.1 การทดสอบการกระจายโหลด
@@ -763,7 +781,9 @@ Workflow deploy ไล่ทีละเครื่อง และ**รอจ�
 | **จำนวนเครื่องคงที่ ไม่รองรับโหลดพุ่งสูงเกินความจุที่ตั้งไว้** | ถ้ามีผู้ใช้มากกว่าที่ 2 เครื่องรับไหว ระบบจะช้า | Auto Scaling ตาม CPU หรือจำนวนคำขอต่อ target |
 | **RDS เป็นจุดเดียวที่ล้มแล้วระบบล้มตาม** (ตอน Single-AZ) | ฐานข้อมูลล่ม = ระบบใช้งานไม่ได้ทั้งหมด | เปิด Multi-AZ (ทำได้แล้วผ่านตัวแปร) และเพิ่ม Read Replica สำหรับงานอ่านหนักเช่นรายงาน |
 | **NAT Gateway มีตัวเดียว** | ถ้า AZ ที่มี NAT ล่ม EC2 ในอีก AZ จะออกอินเทอร์เน็ตไม่ได้ (แต่ยังให้บริการผู้ใช้ได้ปกติ) | สร้าง NAT หนึ่งตัวต่อ AZ |
-| **การรับส่งระหว่าง CloudFront กับ ALB ยังเป็น HTTP** | ผู้ใช้กับ CloudFront เข้ารหัสด้วย HTTPS แล้ว แต่ช่วง CloudFront ไป ALB ยังไม่เข้ารหัส (อยู่ในเครือข่ายของ AWS) | ขอใบรับรองจาก ACM (ฟรี) แล้วเพิ่ม listener :443 ที่ ALB และเปลี่ยน `origin_protocol_policy` เป็น `https-only` · โค้ด Terraform เตรียมไว้แล้วในคอมเมนต์ |
+| **ไม่มี HTTPS เลยทั้งระบบ** | ทั้งหน้าเว็บ (S3 website endpoint) และ API (ALB) เป็น HTTP ข้อมูลรวมถึง JWT ไม่ถูกเข้ารหัสระหว่างทาง · AWS Academy Learner Lab ใช้ CloudFront ไม่ได้ และจดโดเมน/ออกใบรับรองไม่ได้ · S3 website endpoint ไม่รองรับ HTTPS โดยตัวมันเอง | บนบัญชี AWS ปกติ: ขอใบรับรองจาก ACM (ฟรี) เพิ่ม listener :443 ที่ ALB และวาง CloudFront หน้า S3 เพื่อให้ได้ HTTPS ทั้งเส้นทาง |
+| **ไม่มี least privilege ของ IAM** | Learner Lab สร้าง IAM role เองไม่ได้ จึงถูกบังคับใช้ `LabRole` ที่มีสิทธิ์กว้างกว่าที่ระบบต้องใช้มาก ของเดิมจำกัดให้ EC2 อ่าน SSM parameter ได้เฉพาะ path ของโครงงาน | ระบบจริงสร้าง role เฉพาะกิจที่มีเฉพาะสิทธิ์ที่ใช้ และผูก policy แบบ resource-scoped |
+| **ระบบดับทั้งระบบช่วง RDS failover** | `GET /health` ต้อง query ฐานข้อมูลจริงก่อนคืน 200 และ EC2 ทั้งสองเครื่องใช้ RDS endpoint เดียวกัน เมื่อ primary สลับ AZ ทั้งคู่จึง unhealthy พร้อมกัน ALB ไม่เหลือ target ที่ healthy (วัดได้ 14 วินาที) | Multi-AZ ทำ HA ให้ฐานข้อมูล ไม่ได้ทำ zero-downtime ให้ทั้งระบบ · ถ้าต้องการ ต้องแยก health check ระดับ liveness ออกจาก readiness หรือเพิ่ม read replica ให้ traffic อ่านไปต่อได้ |
 | **ไม่มีระบบชำระเงินจริง** | บันทึกได้แค่ราคาประมาณการ | เชื่อมกับ payment gateway ซึ่งอยู่นอกขอบเขตของโครงงานด้าน Cloud |
 | **การทดสอบโหลดยังเป็นสเกลเล็ก** | ยังไม่ทราบขีดจำกัดจริงของระบบ | ใช้เครื่องมืออย่าง k6 หรือ Apache JMeter ยิงระดับพันคำขอต่อวินาที |
 | **ไม่มี Redis หรือ ElastiCache** | ทุกคำขอไปถึงฐานข้อมูล | เพิ่ม ElastiCache สำหรับแคชผลรายงานที่คำนวณหนักและเปลี่ยนไม่บ่อย |
